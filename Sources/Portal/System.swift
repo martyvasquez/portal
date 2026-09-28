@@ -14,6 +14,7 @@ final class HotKeyCenter {
     private(set) var failed: Set<UInt32> = []
     private var installed = false
     private var paused = false
+    private var retryTimer: Timer?
 
     func register(id: UInt32, combo: KeyCombo, handler: @escaping @MainActor () -> Void) {
         installHandlerIfNeeded()
@@ -51,6 +52,20 @@ final class HotKeyCenter {
             failed.remove(id)
         } else {
             failed.insert(id)
+            scheduleRetry()
+        }
+    }
+
+    /// Another app (e.g. Raycast) may be holding the combo; keep trying until it lets go.
+    private func scheduleRetry() {
+        guard retryTimer == nil else { return }
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] timer in
+            guard let self else { return timer.invalidate() }
+            if !self.paused { for id in self.failed { self.activate(id) } }
+            if self.failed.isEmpty {
+                timer.invalidate()
+                self.retryTimer = nil
+            }
         }
     }
 
