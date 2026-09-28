@@ -155,8 +155,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func showSettings() {
-        launcherPanel?.hide()
-        clipboardPanel?.hide()
         if settingsWindow == nil {
             let view = SettingsView(settings: settings, launcher: launcher, store: clipStore, keys: keys, router: router)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
@@ -172,8 +170,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.center()
             settingsWindow = window
         }
-        NSApp.activate()
+        // The launcher never activates Portal (so pastes land in the app you were in), and macOS
+        // won't let an inactive menu bar app pull itself forward. So: become a regular app while
+        // Settings is open (Dock icon, ⌘Tab), activate while the launcher still holds the
+        // keypress, and order the window front regardless. Panels close last for the same reason.
+        NSApp.setActivationPolicy(.regular)
+        // The cooperative NSApp.activate() is refused when another app is active and hasn't yielded,
+        // which is always the case coming from the launcher. The older call still forces it.
+        NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow?.orderFrontRegardless()
+        launcherPanel?.hide()
+        clipboardPanel?.hide()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === settingsWindow else { return }
+        NSApp.setActivationPolicy(.accessory)
     }
 
     @objc private func togglePause() {

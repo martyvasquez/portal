@@ -413,9 +413,9 @@ final class LauncherModel: ObservableObject {
                 FinderSelection.open([url], withAppAt: settings.values.finderSelectionAppPath)
             }
         case .command:
-            onDismiss()
             usage.record(item.id)
-            onCommand(String(item.id.dropFirst(4)))
+            onCommand(String(item.id.dropFirst(4)))   // before dismissing, so Settings can take focus
+            onDismiss()
         case .quicklink:
             guard let link = quicklink(for: item) else { return }
             if action == .copy {
