@@ -1,0 +1,33 @@
+# Portal
+
+A small personal quicklinks launcher + clipboard manager for macOS (replacing Raycast).
+
+- **Quicklinks** (managed in Settings): a name, a folder or URL, and the app it opens in
+  (Finder, Ghostty, Chrome, anything). Optional global hotkey per quicklink. Put `{query}`
+  in a link to be asked for text when you open it.
+- **⌘Space**: pick a quicklink or app. `↩` opens, `⌘↩` opens with the default app instead
+  (Finder / default browser), `⌥↩` copies the link, `⌘1`–`⌘9` open the top results.
+- **⇧⌘V**: clipboard history with search, filters (This Mac / Other Macs / Secrets / Pinned), pins, and paste-into-app.
+- **Sync**: settings and clipboard history sync through a folder in iCloud Drive (`~/Library/Mobile Documents/com~apple~CloudDocs/Portal`).
+  Clips are encrypted (AES-256-GCM, passphrase-derived key) before they're written there, and expire after 7 days by default.
+
+## Build
+
+```sh
+scripts/build.sh --install   # build, sign, copy to /Applications, relaunch
+swift test                   # unit tests
+scripts/show.sh launcher     # open a surface from the terminal: launcher | clipboard | new | settings
+```
+
+## One-time setup on each Mac
+
+1. Quit Raycast, or change its hotkey. Make sure Spotlight isn't on ⌘Space (Settings → General shows a warning if anything conflicts).
+2. Grant **Accessibility** (Settings → General) so clips can be pasted straight into the app you were using.
+3. If macOS asks whether Portal can paste from other apps, choose **Always Allow**.
+4. Settings → Sync → set the same passphrase on both Macs.
+
+## How sync works
+
+Each Mac writes only its own files, `Clipboard/<machine-id>/<time>_<id>_<flags>.clip`, so two Macs never write the same file.
+Expiry, pinned, and secret flags are in the filename, so any Mac can prune expired clips without decrypting them.
+`keycheck.json` holds the salt and an encrypted check value so a wrong passphrase is caught immediately. The passphrase itself never leaves the Mac's Keychain.

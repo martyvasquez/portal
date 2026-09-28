@@ -1,0 +1,880 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+enum SettingsPage: String, CaseIterable, Identifiable {
+    case quicklinks = "Quicklinks", clipboard = "Clipboard", shortcuts = "Shortcuts", sync = "Sync"
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .quicklinks: "link"
+        case .clipboard: "doc.on.clipboard"
+        case .shortcuts: "command"
+        case .sync: "icloud"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .quicklinks: Theme.accent
+        case .clipboard: .teal
+        case .shortcuts: .purple
+        case .sync: .green
+        }
+    }
+}
+
+/// Lets the launcher open Settings on a specific page or straight into a new quicklink.
+@MainActor
+final class SettingsRouter: ObservableObject {
+    @Published var page: SettingsPage = .quicklinks
+    @Published var editing: QuicklinkDraft?
+}
+
+struct QuicklinkDraft: Identifiable {
+    var link: Quicklink
+    let isNew: Bool
+    var id: UUID { link.id }
+}
+
+struct SettingsView: View {
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var launcher: LauncherModel
+    @ObservedObject var store: ClipStore
+    @ObservedObject var keys: KeyManager
+    @ObservedObject var router: SettingsRouter
+
+    var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+            Divider()
+            Group {
+                switch router.page {
+                case .quicklinks: QuicklinksPage(settings: settings, router: router)
+                case .clipboard: ClipboardPage(settings: settings, store: store)
+                case .shortcuts: ShortcutsPage(settings: settings, launcher: launcher)
+                case .sync: SyncPage(settings: settings, store: store, keys: keys)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Theme.content)
+        }
+        .ignoresSafeArea()
+        .frame(minWidth: 780, minHeight: 540)
+        .tint(Theme.accent)
+        .sheet(item: $router.editing) { draft in
+            QuicklinkEditor(draft: draft, settings: settings) { router.editing = nil }
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(SettingsPage.allCases) { page in
+                SidebarRow(title: page.rawValue, symbol: page.symbol, tint: page.tint,
+                           isSelected: router.page == page,
+                           badge: page == .quicklinks ? settings.values.quicklinks.count : 0)
+                    .onTapGesture { router.page = page }
+            }
+            Spacer()
+            Label(syncStatus, systemImage: store.mode == .sync ? "icloud" : "internaldrive")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 14)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 52) // clear the traffic lights
+        .frame(width: 210)
+        .frame(maxHeight: .infinity)
+        .background(Theme.sidebar)
+    }
+
+    private var syncStatus: String {
+        guard settings.syncEnabled else { return "Sync off" }
+        return store.mode == .sync ? "Synced with iCloud" : "Settings synced"
+    }
+}
+
+/// Title block at the top of each page.
+private struct PageHeader<Trailing: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.title2.weight(.semibold))
+                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            trailing
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 44)
+        .padding(.bottom, 12)
+    }
+}
+
+extension PageHeader where Trailing == EmptyView {
+    init(title: String, subtitle: String) {
+        self.init(title: title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+// MARK: - Quicklinks
+
+private struct QuicklinksPage: View {
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var router: SettingsRouter
+    @State private var selected: UUID?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Quicklinks", subtitle: "Folders and URLs, each opening in the app you choose.") {
+                Button {
+                    router.editing = QuicklinkDraft(link: Quicklink(name: "", link: ""), isNew: true)
+                } label: {
+                    Label("New Quicklink", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("n")
+            }
+
+            if settings.values.quicklinks.isEmpty {
+                ContentUnavailableView {
+                    Label("No Quicklinks", systemImage: "link")
+                } description: {
+                    Text("Add a folder to open in Finder or Ghostty, or a URL to open in Chrome.")
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(settings.values.quicklinks) { link in
+                        QuicklinkCard(link: link, isSelected: selected == link.id,
+                                      edit: { edit(link) }, duplicate: { duplicate(link) }, delete: { delete(link) })
+                            .onTapGesture(count: 2) { edit(link) }
+                            .onTapGesture { selected = link.id }
+                            .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                    .onMove { settings.values.quicklinks.move(fromOffsets: $0, toOffset: $1) }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .onDeleteCommand {
+                    if let id = selected, let link = settings.values.quicklinks.first(where: { $0.id == id }) { delete(link) }
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "lightbulb").foregroundStyle(.yellow)
+                    Text("Drag to reorder. Put **{query}** in a link to type something when you open it, like `https://github.com/search?q={query}`.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func edit(_ link: Quicklink) {
+        selected = link.id
+        router.editing = QuicklinkDraft(link: link, isNew: false)
+    }
+
+    private func duplicate(_ link: Quicklink) {
+        var copy = link
+        copy.id = UUID()
+        copy.name += " Copy"
+        copy.hotKey = nil
+        if let i = settings.values.quicklinks.firstIndex(where: { $0.id == link.id }) {
+            settings.values.quicklinks.insert(copy, at: i + 1)
+        }
+    }
+
+    private func delete(_ link: Quicklink) {
+        withAnimation(Motion.standard) { settings.values.quicklinks.removeAll { $0.id == link.id } }
+    }
+}
+
+private struct QuicklinkCard: View {
+    let link: Quicklink
+    let isSelected: Bool
+    let edit: () -> Void
+    let duplicate: () -> Void
+    let delete: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            QuicklinkIcon(link: link).frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(link.name).lineLimit(1)
+                HStack(spacing: 4) {
+                    if link.isFolder && !link.needsQuery && !FileManager.default.fileExists(atPath: Paths.expand(link.link).path) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            .help("This folder doesn't exist on this Mac.")
+                    }
+                    Text(link.link).lineLimit(1).truncationMode(.middle)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            if link.needsQuery { Pill(text: "Query") }
+            Pill(text: link.appName)
+            if let hotKey = link.hotKey { KeyCap(text: hotKey.display) }
+            Menu {
+                Button("Edit…", action: edit)
+                Button("Duplicate", action: duplicate)
+                Divider()
+                Button("Delete", role: .destructive, action: delete)
+            } label: {
+                Image(systemName: "ellipsis").foregroundStyle(.secondary).frame(width: 20, height: 20)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .opacity(hovering || isSelected ? 1 : 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .card(isSelected: isSelected)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Edit…", action: edit)
+            Button("Duplicate", action: duplicate)
+            Divider()
+            Button("Delete", role: .destructive, action: delete)
+        }
+    }
+}
+
+/// Apps offered in "Open with"; only the installed ones are shown.
+private enum OpenWithApps {
+    static let candidates = [
+        "/System/Library/CoreServices/Finder.app",
+        "/Applications/Ghostty.app",
+        "/Applications/Google Chrome.app",
+        "/Applications/Safari.app",
+        "/Applications/Arc.app",
+        "/Applications/Firefox.app",
+        "/Applications/Cursor.app",
+        "/Applications/Visual Studio Code.app",
+        "/Applications/Zed.app",
+        "/System/Applications/Utilities/Terminal.app",
+        "/Applications/iTerm.app",
+    ]
+
+    static var installed: [String] { candidates.filter { FileManager.default.fileExists(atPath: $0) } }
+
+    static func name(_ path: String) -> String {
+        let n = FileManager.default.displayName(atPath: path)
+        return n.hasSuffix(".app") ? String(n.dropLast(4)) : n
+    }
+}
+
+private struct QuicklinkEditor: View {
+    @State private var link: Quicklink
+    let isNew: Bool
+    @ObservedObject var settings: SettingsStore
+    let dismiss: () -> Void
+    private static let other = "__other__"
+
+    init(draft: QuicklinkDraft, settings: SettingsStore, dismiss: @escaping () -> Void) {
+        _link = State(initialValue: draft.link)
+        isNew = draft.isNew
+        self.settings = settings
+        self.dismiss = dismiss
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                QuicklinkIcon(link: link).frame(width: 36, height: 36)
+                TextField("Name", text: $link.name)
+                    .textFieldStyle(.plain)
+                    .font(.title2.weight(.semibold))
+            }
+
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 14) {
+                GridRow {
+                    Text("Link").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            TextField("~/Development or https://…", text: $link.link)
+                                .textFieldStyle(.roundedBorder)
+                                .controlSize(.large)
+                            Button { chooseFolder() } label: { Image(systemName: "folder") }
+                                .controlSize(.large)
+                                .help("Choose a folder")
+                        }
+                        Text("A folder or URL. Add {query} to type something each time you open it.")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                GridRow {
+                    Text("Open with").foregroundStyle(.secondary)
+                    Picker("", selection: openWith) {
+                        Text(link.isFolder ? "Default (Finder)" : "Default Browser").tag("")
+                        Divider()
+                        ForEach(appChoices, id: \.self) { path in
+                            Label {
+                                Text(OpenWithApps.name(path))
+                            } icon: {
+                                Image(nsImage: IconCache.menuIcon(forPath: path))
+                            }
+                            .tag(path)
+                        }
+                        Divider()
+                        Text("Other App…").tag(Self.other)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                GridRow {
+                    Text("Hotkey").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HotKeyRecorder(combo: $link.hotKey, placeholder: "Record Hotkey")
+                        if let clash = hotKeyClash {
+                            Label("Already used by \(clash).", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption).foregroundStyle(.orange)
+                        } else {
+                            Text("Opens this quicklink from anywhere, no launcher needed.")
+                                .font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                if !isNew {
+                    Button("Delete", role: .destructive) {
+                        settings.values.quicklinks.removeAll { $0.id == link.id }
+                        dismiss()
+                    }
+                    .tint(.red)
+                }
+                Spacer()
+                Button("Cancel", role: .cancel, action: dismiss).keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add Quicklink" : "Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isValid)
+            }
+        }
+        .padding(22)
+        .frame(width: 500)
+        .tint(Theme.accent)
+    }
+
+    private var isValid: Bool {
+        !link.link.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var appChoices: [String] {
+        var apps = OpenWithApps.installed
+        if let custom = link.appPath, !apps.contains(custom) { apps.append(custom) }
+        return apps
+    }
+
+    private var openWith: Binding<String> {
+        Binding(
+            get: { link.appPath ?? "" },
+            set: { value in
+                if value == Self.other { chooseApp() } else { link.appPath = value.isEmpty ? nil : value }
+            })
+    }
+
+    private var hotKeyClash: String? {
+        guard let combo = link.hotKey else { return nil }
+        let v = settings.values
+        if combo.keyCode == v.launcherHotKey.keyCode && combo.modifiers == v.launcherHotKey.modifiers { return "the launcher" }
+        if combo.keyCode == v.clipboardHotKey.keyCode && combo.modifiers == v.clipboardHotKey.modifiers { return "clipboard history" }
+        if let other = v.quicklinks.first(where: {
+            $0.id != link.id && $0.hotKey?.keyCode == combo.keyCode && $0.hotKey?.modifiers == combo.modifiers
+        }) { return "“\(other.name)”" }
+        return SystemHotKeys.conflict(for: combo)
+    }
+
+    private func save() {
+        var saved = link
+        saved.link = saved.link.trimmingCharacters(in: .whitespaces)
+        if saved.isFolder { saved.link = Paths.abbreviate(Paths.expand(saved.link).path) }
+        if saved.name.trimmingCharacters(in: .whitespaces).isEmpty { saved.name = defaultName(for: saved) }
+        if let i = settings.values.quicklinks.firstIndex(where: { $0.id == saved.id }) {
+            settings.values.quicklinks[i] = saved
+        } else {
+            settings.values.quicklinks.append(saved)
+        }
+        dismiss()
+    }
+
+    private func defaultName(for link: Quicklink) -> String {
+        if link.isFolder { return Paths.expand(link.link).lastPathComponent }
+        return URL(string: link.link)?.host() ?? link.link
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        link.link = Paths.abbreviate(url.path)
+        if link.name.isEmpty { link.name = url.lastPathComponent }
+    }
+
+    private func chooseApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url { link.appPath = url.path }
+    }
+}
+
+// MARK: - Hotkey recorder
+
+struct HotKeyRecorder: View {
+    @Binding var combo: KeyCombo?
+    var defaultCombo: KeyCombo?
+    var placeholder = "Record Shortcut"
+    @State private var recording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { recording ? stop() : start() } label: {
+                Text(recording ? "Type shortcut…" : (combo?.display ?? placeholder))
+                    .font(combo == nil || recording ? .callout : .callout.monospaced())
+                    .foregroundStyle(combo == nil || recording ? .secondary : .primary)
+                    .frame(minWidth: 110)
+            }
+            if !recording, let current = combo {
+                if let defaultCombo, current != defaultCombo {
+                    Button { combo = defaultCombo } label: { Image(systemName: "arrow.uturn.backward") }
+                        .buttonStyle(.borderless)
+                        .help("Reset to \(defaultCombo.display)")
+                } else if defaultCombo == nil {
+                    Button { combo = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.tertiary)
+                        .help("Remove hotkey")
+                }
+            }
+        }
+        .onDisappear { if recording { stop() } }
+    }
+
+    private func start() {
+        recording = true
+        HotKeyCenter.shared.pause()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { stop(); return nil }
+            let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard !mods.isEmpty || KeyCombo.isFunctionKey(event.keyCode) else {
+                NSSound.beep()
+                return nil
+            }
+            combo = KeyCombo(event: event)
+            stop()
+            return nil
+        }
+    }
+
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recording = false
+        DispatchQueue.main.async { HotKeyCenter.shared.resume() }
+    }
+}
+
+extension HotKeyRecorder {
+    /// For shortcuts that always exist (launcher, clipboard): no clear button, only reset.
+    init(required: Binding<KeyCombo>, defaultCombo: KeyCombo) {
+        self.init(combo: Binding(get: { required.wrappedValue }, set: { if let v = $0 { required.wrappedValue = v } }),
+                  defaultCombo: defaultCombo)
+    }
+}
+
+// MARK: - Shortcuts
+
+private struct ShortcutsPage: View {
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var launcher: LauncherModel
+    @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var loginError: String?
+    @State private var axGranted = Permissions.accessibilityGranted
+    @State private var tick = 0
+    private let timer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Shortcuts", subtitle: "How you summon Portal, and what it needs from macOS.")
+            Form {
+                Section {
+                    LabeledContent("Launcher") {
+                        HotKeyRecorder(required: $settings.values.launcherHotKey, defaultCombo: .launcherDefault)
+                    }
+                    conflictWarning(for: settings.values.launcherHotKey, id: 1)
+                    LabeledContent("Clipboard history") {
+                        HotKeyRecorder(required: $settings.values.clipboardHotKey, defaultCombo: .clipboardDefault)
+                    }
+                    conflictWarning(for: settings.values.clipboardHotKey, id: 2)
+                }
+
+                Section {
+                    LabeledContent("Open with") {
+                        Picker("", selection: $settings.values.finderSelectionAppPath) {
+                            ForEach(finderApps, id: \.self) { path in
+                                Label { Text(OpenWithApps.name(path)) } icon: { Image(nsImage: IconCache.menuIcon(forPath: path)) }
+                                    .tag(path)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    LabeledContent("Hotkey") {
+                        HotKeyRecorder(combo: $settings.values.finderSelectionHotKey, placeholder: "Record Hotkey")
+                    }
+                } header: {
+                    Text("Finder Selection")
+                } footer: {
+                    Text("Open the launcher while Finder is in front and the selected folder is the first result. The hotkey skips the launcher. Selected files open their folder; with nothing selected, the front window's folder is used.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle("Show apps in the launcher", isOn: $settings.values.includeApps)
+                } footer: {
+                    Text("\(launcher.appCount) apps found in /Applications.").font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle("Open Portal at login", isOn: $launchAtLogin)
+                        .onChange(of: launchAtLogin) { _, on in
+                            do { try LoginItem.set(on); loginError = nil }
+                            catch { loginError = error.localizedDescription; launchAtLogin = LoginItem.isEnabled }
+                        }
+                    if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
+                }
+
+                Section {
+                    LabeledContent("Accessibility") {
+                        if axGranted {
+                            Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        } else {
+                            Button("Allow…") {
+                                Permissions.requestAccessibility()
+                                Permissions.openAccessibilitySettings()
+                            }
+                        }
+                    }
+                    LabeledContent("Paste from other apps") {
+                        Button("Privacy Settings…") { Permissions.openPrivacySettings() }
+                    }
+                } header: {
+                    Text("Permissions")
+                } footer: {
+                    Text("Accessibility lets Portal paste into the app you were using. If macOS asks whether Portal may paste from other apps, choose Always Allow.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+        }
+        .onReceive(timer) { _ in
+            axGranted = Permissions.accessibilityGranted
+            tick += 1
+        }
+    }
+
+    private var finderApps: [String] {
+        var apps = OpenWithApps.installed.filter { !$0.hasSuffix("Finder.app") }
+        let current = settings.values.finderSelectionAppPath
+        if !apps.contains(current) { apps.insert(current, at: 0) }
+        return apps
+    }
+
+    @ViewBuilder
+    private func conflictWarning(for combo: KeyCombo, id: UInt32) -> some View {
+        let _ = tick // re-check so the warning clears once fixed in System Settings
+        if let owner = SystemHotKeys.conflict(for: combo) {
+            HStack(alignment: .firstTextBaseline) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(combo.display) is also set for \(owner). Turn that off so Portal gets it.")
+                    Button("Open Keyboard Shortcuts…") { SystemHotKeys.openKeyboardShortcuts() }
+                        .buttonStyle(.link)
+                }
+            }
+            .font(.callout)
+        } else if combo == .launcherDefault, !SystemHotKeys.runningLauncherApps().isEmpty {
+            Label("\(SystemHotKeys.runningLauncherApps().joined(separator: " and ")) is running and may be holding \(combo.display). Quit it or change its hotkey.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.callout).foregroundStyle(.orange)
+        } else if HotKeyCenter.shared.failed.contains(id) {
+            Label("Another app already registered \(combo.display).", systemImage: "exclamationmark.triangle.fill")
+                .font(.callout).foregroundStyle(.orange)
+        }
+    }
+}
+
+// MARK: - Clipboard
+
+private struct ClipboardPage: View {
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var store: ClipStore
+    @State private var confirmClear = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Clipboard", subtitle: "A rolling history of what you copy, shared between your Macs.")
+            Form {
+                Section("History") {
+                    Stepper(value: $settings.values.clipboardRetentionDays, in: 1...60) {
+                        LabeledContent("Keep clips for", value: days(settings.values.clipboardRetentionDays))
+                    }
+                    Stepper(value: $settings.values.maxClipsPerMac, in: 100...10_000, step: 100) {
+                        LabeledContent("Most clips per Mac", value: settings.values.maxClipsPerMac.formatted())
+                    }
+                    Stepper(value: $settings.values.maxImageMB, in: 1...50) {
+                        LabeledContent("Skip images over", value: "\(settings.values.maxImageMB) MB")
+                    }
+                }
+
+                Section {
+                    Toggle("Record secrets", isOn: $settings.values.recordSecrets)
+                    Stepper(value: $settings.values.secretRetentionDays, in: 1...60) {
+                        LabeledContent("Keep secrets for", value: days(settings.values.secretRetentionDays))
+                    }
+                    .disabled(!settings.values.recordSecrets)
+                } header: {
+                    Text("Secrets")
+                } footer: {
+                    Text("Copies from password managers, plus anything that looks like an API key, token, or private key. They're masked in the list and ⌘R reveals them.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Picker("Return", selection: $settings.values.pasteOnSelect) {
+                        Text("Pastes into the current app").tag(true)
+                        Text("Copies to the clipboard").tag(false)
+                    }
+                } header: {
+                    Text("Pasting")
+                } footer: {
+                    Text("⌘Return does the other one. Pinned clips (⌘P) never expire.").font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle("Clean up text copied from terminals", isOn: $settings.values.cleanTerminalCopies)
+                    Toggle("Rejoin lines the terminal wrapped", isOn: $settings.values.unwrapTerminalLines)
+                        .disabled(!settings.values.cleanTerminalCopies)
+                } header: {
+                    Text("Terminal Copies")
+                } footer: {
+                    Text("For Ghostty, Terminal, iTerm, and similar: removes trailing spaces, shared indentation, box borders, and Claude Code's ⏺ marker, and rejoins wrapped sentences. Commands and code keep their line breaks. The cleaned text is what ⌘V pastes; ⇧↩ in clipboard history pastes the original.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Never record from") {
+                    ForEach(settings.values.ignoredBundleIDs, id: \.self) { id in
+                        HStack {
+                            if let icon = IconCache.appIcon(bundleID: id) {
+                                Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                            }
+                            Text(appName(id))
+                            Spacer()
+                            Button { settings.values.ignoredBundleIDs.removeAll { $0 == id } } label: {
+                                Image(systemName: "minus.circle.fill")
+                            }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        }
+                    }
+                    Button("Add App…", action: addIgnoredApp)
+                }
+
+                Section {
+                    let mine = store.clips.filter { $0.payload.machineID == settings.machineID }.count
+                    LabeledContent("Stored", value: "\(store.clips.count) clips, \(mine) from this Mac")
+                    Button("Clear History from This Mac…", role: .destructive) { confirmClear = true }
+                        .confirmationDialog("Delete every unpinned clip copied on this Mac?", isPresented: $confirmClear) {
+                            Button("Delete", role: .destructive) { store.clearThisMac() }
+                        }
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func days(_ n: Int) -> String { n == 1 ? "1 day" : "\(n) days" }
+
+    private func appName(_ bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
+        return OpenWithApps.name(url.path)
+    }
+
+    private func addIgnoredApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let id = Bundle(url: url)?.bundleIdentifier, !settings.values.ignoredBundleIDs.contains(id) {
+                settings.values.ignoredBundleIDs.append(id)
+            }
+        }
+    }
+}
+
+// MARK: - Sync
+
+private struct SyncPage: View {
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var store: ClipStore
+    @ObservedObject var keys: KeyManager
+    @State private var pass1 = ""
+    @State private var pass2 = ""
+    @State private var error: String?
+    @State private var busy = false
+    @State private var confirmReset = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Sync", subtitle: "Quicklinks, settings, and clipboard history across your Macs.")
+            Form {
+                Section {
+                    Toggle("Sync through iCloud Drive", isOn: $settings.syncEnabled)
+                    if !Paths.iCloudDriveAvailable {
+                        Label("iCloud Drive is off on this Mac. Turn it on in System Settings → Apple Account → iCloud, or choose another synced folder.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout).foregroundStyle(.orange)
+                    }
+                    LabeledContent("Folder") {
+                        HStack {
+                            Text(settings.syncFolderPath).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                            Button("Change…", action: chooseFolder)
+                            Button {
+                                try? FileManager.default.createDirectory(at: settings.syncFolderURL, withIntermediateDirectories: true)
+                                NSWorkspace.shared.open(settings.syncFolderURL)
+                            } label: { Image(systemName: "arrow.up.forward.square") }
+                                .buttonStyle(.borderless)
+                                .help("Show in Finder")
+                        }
+                    }
+                    .disabled(!settings.syncEnabled)
+                } footer: {
+                    Text("Use the same folder on each Mac. Each Mac writes only its own files, so they never overwrite each other.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                if settings.syncEnabled {
+                    encryptionSection
+                    statusSection
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    @ViewBuilder private var encryptionSection: some View {
+        Section {
+            switch keys.state {
+            case .ready:
+                Label("Clipboard history is encrypted and syncing.", systemImage: "lock.fill")
+                    .foregroundStyle(.green)
+                HStack {
+                    Button("Forget Passphrase on This Mac") { keys.forgetOnThisMac() }
+                    Spacer()
+                    Button("Reset Encryption…", role: .destructive) { confirmReset = true }
+                }
+            case .needsPassphrase(let existing):
+                Text(existing
+                     ? "Your other Mac already set a passphrase. Enter it to share clipboard history."
+                     : "Choose a passphrase, then enter the same one on your other Mac. It stays in this Mac's Keychain and never goes to iCloud.")
+                    .font(.callout)
+                SecureField("Passphrase", text: $pass1)
+                if !existing { SecureField("Confirm", text: $pass2) }
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+                HStack {
+                    if existing {
+                        Button("Forgot it?", role: .destructive) { confirmReset = true }.buttonStyle(.link)
+                    }
+                    Spacer()
+                    if busy { ProgressView().controlSize(.small) }
+                    Button(existing ? "Unlock" : "Set Passphrase") { submit(existing: existing) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(pass1.isEmpty || busy)
+                }
+            case .disabled:
+                EmptyView()
+            }
+        } header: {
+            Text("Encryption")
+        } footer: {
+            Text("Clips are encrypted (AES-256) before they reach iCloud Drive. Until you set a passphrase, clipboard history stays on this Mac; quicklinks and settings still sync.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .confirmationDialog("Reset sync encryption?", isPresented: $confirmReset) {
+            Button("Delete Synced Clips and Reset", role: .destructive) { keys.resetSync() }
+        } message: {
+            Text("This deletes all synced clipboard history. Your other Macs will ask for the new passphrase.")
+        }
+    }
+
+    @ViewBuilder private var statusSection: some View {
+        Section("Macs") {
+            let groups = Dictionary(grouping: store.clips, by: { $0.payload.machineID })
+            LabeledContent(settings.machineName, value: "This Mac · \(groups[settings.machineID]?.count ?? 0) clips")
+            ForEach(groups.keys.sorted().filter { $0 != settings.machineID }, id: \.self) { id in
+                let clips = groups[id] ?? []
+                LabeledContent(clips.first?.payload.machineName ?? "Other Mac", value: "\(clips.count) clips")
+            }
+            if store.undecryptable > 0 {
+                Label("\(store.undecryptable) clips couldn't be decrypted. They may still be downloading, or came from a Mac using a different passphrase.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func submit(existing: Bool) {
+        error = nil
+        if !existing && pass1 != pass2 {
+            error = "Those don't match."
+            return
+        }
+        busy = true
+        let passphrase = pass1
+        DispatchQueue.main.async { // let the spinner draw; key derivation is deliberately slow
+            do {
+                try keys.setPassphrase(passphrase)
+                pass1 = ""
+                pass2 = ""
+            } catch {
+                self.error = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = Paths.iCloudDrive
+        panel.prompt = "Use Folder"
+        if panel.runModal() == .OK, let url = panel.url { settings.syncFolderPath = Paths.abbreviate(url.path) }
+    }
+}
