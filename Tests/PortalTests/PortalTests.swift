@@ -30,7 +30,8 @@ import CryptoKit
 }
 
 @Suite struct SecretTests {
-    @Test(arguments: [
+    // Split so the fake keys don't trip GitHub's secret scanning.
+    static let fakeSecrets: [String] = [
         "sk-" + "ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
         "gh" + "p_abcdefghijklmnopqrstuvwxyz0123456789AB",
         "AKIA" + "IOSFODNN7EXAMPLE",
@@ -38,7 +39,9 @@ import CryptoKit
         "xo" + "xb-1234567890-abcdefghij",
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
         "q8Vd7mX2pL9wK4zR1tY6uN3bC5hJ0gF8sA7eD2",
-    ]) // split so the fake keys don't trip GitHub's secret scanning
+    ]
+
+    @Test(arguments: fakeSecrets)
     func detectsSecrets(_ s: String) { #expect(SecretDetector.looksSecret(s)) }
 
     @Test(arguments: [
