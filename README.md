@@ -5,6 +5,10 @@ A small personal quicklinks launcher + clipboard manager for macOS (replacing Ra
 - **Quicklinks** (managed in Settings): a name, a folder or URL, and the app it opens in
   (Finder, Ghostty, Chrome, anything). Optional global hotkey per quicklink. Put `{query}`
   in a link to be asked for text when you open it.
+- **Open With** (Settings → Open With): with Finder in front, the launcher offers apps for
+  the selection: one ordered list for folders (e.g. Ghostty → Terminal → Sublime Text), one
+  for files. The first app is the default. Excluded file types (images, PDFs, archives, …)
+  open their folder instead. Optional hotkey opens the selection with the defaults.
 - **⌘Space**: pick a quicklink or app. `↩` opens, `⌘↩` opens with the default app instead
   (Finder / default browser), `⌥↩` copies the link, `⌘1`–`⌘9` open the top results.
 - **⇧⌘V**: clipboard history with search, filters (This Mac / Other Macs / Secrets / Pinned), pins, and paste-into-app.

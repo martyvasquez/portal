@@ -95,7 +95,7 @@ struct LauncherView: View {
 
     private func header(for kind: LaunchKind) -> String {
         switch kind {
-        case .finder: model.finderFolders.count > 1 ? "Finder Selection" : "Finder"
+        case .finder: "Finder Selection"
         case .quicklink: "Quicklinks"
         case .app: model.query.isEmpty ? "Recent Apps" : "Apps"
         case .command: "Portal"

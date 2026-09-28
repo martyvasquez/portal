@@ -5,6 +5,7 @@ import AppKit
 enum FinderSelection {
     struct Result {
         let folders: [URL]
+        let files: [URL]
         let fromSelection: Bool   // false = nothing selected, using the front window's folder
     }
 
@@ -29,9 +30,9 @@ enum FinderSelection {
     end tell
     """
 
-    /// Folders to act on: selected folders, the parent folder of selected files,
-    /// or the front window's folder when nothing is selected.
-    static func current() -> Result? {
+    /// Selected folders, and selected files (except excluded types, which count as
+    /// their folder). With nothing selected, the front window's folder.
+    static func current(excludedTypes: [String]) -> Result? {
         var error: NSDictionary?
         guard let output = NSAppleScript(source: source)?.executeAndReturnError(&error).stringValue else {
             if let error { NSLog("Portal: Finder selection unavailable: \(error)") }
@@ -41,26 +42,44 @@ enum FinderSelection {
         guard let kind = lines.first else { return nil }
         lines.removeFirst()
 
-        var seen = Set<String>()
-        let folders: [URL] = lines.compactMap { path in
-            var url = URL(fileURLWithPath: path)
-            var isDir: ObjCBool = false
-            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-            let isBundle = NSWorkspace.shared.isFilePackage(atPath: url.path)
-            if !isDir.boolValue || isBundle { url.deleteLastPathComponent() }
-            return seen.insert(url.standardizedFileURL.path).inserted ? url.standardizedFileURL : nil
-        }
-        guard !folders.isEmpty else { return nil }
-        return Result(folders: Array(folders.prefix(8)), fromSelection: kind == "S")
+        let (folders, files) = classify(lines, excludedTypes: excludedTypes)
+        guard !folders.isEmpty || !files.isEmpty else { return nil }
+        return Result(folders: Array(folders.prefix(8)), files: Array(files.prefix(8)), fromSelection: kind == "S")
     }
 
-    static func open(_ folders: [URL], withAppAt appPath: String) {
+    /// Splits paths into folders and files. Packages (apps, .pages docs) count as files; excluded file
+    /// types become their parent folder. Duplicates are dropped, order is kept.
+    nonisolated static func classify(_ paths: [String], excludedTypes: [String]) -> (folders: [URL], files: [URL]) {
+        let excluded = Set(excludedTypes.map { $0.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ". ")) })
+        var folders: [URL] = [], files: [URL] = []
+        var seen = Set<String>()
+        func add(_ url: URL, to list: inout [URL]) {
+            let url = url.standardizedFileURL
+            if seen.insert(url.path).inserted { list.append(url) }
+        }
+        for path in paths {
+            let url = URL(fileURLWithPath: path)
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            let isFolder = isDir.boolValue && !NSWorkspace.shared.isFilePackage(atPath: url.path)
+            if isFolder {
+                add(url, to: &folders)
+            } else if excluded.contains(url.pathExtension.lowercased()) {
+                add(url.deletingLastPathComponent(), to: &folders)
+            } else {
+                add(url, to: &files)
+            }
+        }
+        return (folders, files)
+    }
+
+    static func open(_ urls: [URL], withAppAt appPath: String) {
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
         let app = URL(fileURLWithPath: appPath)
-        for folder in folders {
-            NSWorkspace.shared.open([folder], withApplicationAt: app, configuration: cfg) { _, error in
-                if let error { NSLog("Portal: couldn't open \(folder.path): \(error)") }
+        for url in urls {
+            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: cfg) { _, error in
+                if let error { NSLog("Portal: couldn't open \(url.path): \(error)") }
             }
         }
     }

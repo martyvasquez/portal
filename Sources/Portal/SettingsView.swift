@@ -2,14 +2,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case quicklinks = "Quicklinks", clipboard = "Clipboard", shortcuts = "Shortcuts", sync = "Sync"
+    case general = "General", quicklinks = "Quicklinks", openWith = "Open With", clipboard = "Clipboard", sync = "Sync"
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
         case .quicklinks: "link"
+        case .openWith: "arrow.up.forward.app"
         case .clipboard: "doc.on.clipboard"
-        case .shortcuts: "command"
+        case .general: "gearshape"
         case .sync: "icloud"
         }
     }
@@ -17,8 +18,9 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .quicklinks: Theme.accent
+        case .openWith: .orange
         case .clipboard: .teal
-        case .shortcuts: .purple
+        case .general: .gray
         case .sync: .green
         }
     }
@@ -51,8 +53,9 @@ struct SettingsView: View {
             Group {
                 switch router.page {
                 case .quicklinks: QuicklinksPage(settings: settings, router: router)
+                case .openWith: OpenWithPage(settings: settings)
                 case .clipboard: ClipboardPage(settings: settings, store: store)
-                case .shortcuts: ShortcutsPage(settings: settings, launcher: launcher)
+                case .general: GeneralPage(settings: settings, launcher: launcher)
                 case .sync: SyncPage(settings: settings, store: store, keys: keys)
                 }
             }
@@ -438,6 +441,243 @@ private struct QuicklinkEditor: View {
     }
 }
 
+// MARK: - Open With
+
+/// Apps for whatever's selected in Finder: one ordered list for folders, one for files.
+private struct OpenWithPage: View {
+    @ObservedObject var settings: SettingsStore
+    @State private var newType = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Open With",
+                       subtitle: "With Finder in front, the launcher offers these apps for what you've selected.")
+            List {
+                AppListSection(title: "Folders", symbol: "folder.fill", tint: .blue,
+                               apps: $settings.values.folderOpenWith,
+                               empty: "Add an app to open selected folders with.")
+                AppListSection(title: "Files", symbol: "doc.fill", tint: .secondary,
+                               apps: $settings.values.fileOpenWith,
+                               empty: "Add an app to open selected files with.")
+
+                Section {
+                    SectionHeader(title: "Treat as Folder", symbol: "nosign", tint: .red).plainRow()
+                    VStack(alignment: .leading, spacing: 10) {
+                        FlowLayout(spacing: 6) {
+                            ForEach(settings.values.excludedFileTypes, id: \.self) { type in
+                                TypeChip(type: type) {
+                                    settings.values.excludedFileTypes.removeAll { $0 == type }
+                                }
+                            }
+                            TextField("Add type", text: $newType)
+                                .textFieldStyle(.plain)
+                                .font(.callout.monospaced())
+                                .frame(width: 90)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                                .onSubmit(addType)
+                        }
+                        Text("Selected files of these types open their folder with the folder apps instead.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .card()
+                    .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                Section {
+                    SectionHeader(title: "Hotkey", symbol: "command", tint: .purple).plainRow()
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Open selection with the default apps")
+                            Text("Skips the launcher. Folders open with the first folder app, files with the first file app. Only active while Finder is in front, so other apps keep this shortcut.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        HotKeyRecorder(combo: $settings.values.finderSelectionHotKey, placeholder: "Record Hotkey")
+                    }
+                    .padding(12)
+                    .card()
+                    .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func addType() {
+        let type = newType.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ". ").union(.whitespaces))
+        newType = ""
+        guard !type.isEmpty, !settings.values.excludedFileTypes.contains(type) else { return }
+        settings.values.excludedFileTypes.append(type)
+    }
+}
+
+private struct AppEntry: Identifiable {
+    let section: String
+    let index: Int
+    let path: String
+    var id: String { "\(section)|\(path)" }
+}
+
+private extension View {
+    /// A list row with no chrome, inset to line up with the cards.
+    func plainRow() -> some View {
+        listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .moveDisabled(true)
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).foregroundStyle(tint).imageScale(.small)
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 14)
+        .padding(.bottom, 2)
+    }
+}
+
+/// Ordered, drag-to-reorder list of apps. The first one is the default (↩).
+private struct AppListSection: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    @Binding var apps: [String]
+    let empty: String
+
+    var body: some View {
+        Section {
+            SectionHeader(title: title, symbol: symbol, tint: tint).plainRow()
+            // Ids include the section: the same app can be in both lists.
+            ForEach(apps.indices.map { AppEntry(section: title, index: $0, path: apps[$0]) }) { entry in
+                AppRow(path: entry.path, isDefault: entry.index == 0,
+                       missing: !FileManager.default.fileExists(atPath: entry.path)) {
+                    apps.removeAll { $0 == entry.path }
+                }
+                .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+            .onMove { apps.move(fromOffsets: $0, toOffset: $1) }
+
+            Button(action: addApps) {
+                Label(apps.isEmpty ? empty : "Add App…", systemImage: "plus")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 2, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private func addApps() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls where !apps.contains(url.path) { apps.append(url.path) }
+    }
+}
+
+private struct AppRow: View {
+    let path: String
+    let isDefault: Bool
+    let missing: Bool
+    let remove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: IconCache.icon(forPath: path)).resizable().interpolation(.high).frame(width: 24, height: 24)
+            Text(SharedSettings.appName(path))
+            if missing {
+                Label("Not installed on this Mac", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            Spacer()
+            if isDefault { Pill(text: "↩ Default") }
+            Button(action: remove) { Image(systemName: "xmark.circle.fill") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .opacity(hovering ? 1 : 0)
+                .help("Remove")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .card()
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct TypeChip: View {
+    let type: String
+    let remove: () -> Void
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(".\(type)").font(.callout.monospaced())
+            Button(action: remove) { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Wraps its children onto new lines, left to right.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        return CGSize(width: proposal.width ?? rows.width, height: rows.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrange(width: bounds.width, subviews: subviews)
+        for (index, point) in rows.origins.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (origins: [CGPoint], width: CGFloat, height: CGFloat) {
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            maxX = max(maxX, x - spacing)
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (origins, maxX, y + rowHeight)
+    }
+}
+
 // MARK: - Hotkey recorder
 
 struct HotKeyRecorder: View {
@@ -503,9 +743,9 @@ extension HotKeyRecorder {
     }
 }
 
-// MARK: - Shortcuts
+// MARK: - General
 
-private struct ShortcutsPage: View {
+private struct GeneralPage: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var launcher: LauncherModel
     @State private var launchAtLogin = LoginItem.isEnabled
@@ -516,7 +756,7 @@ private struct ShortcutsPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(title: "Shortcuts", subtitle: "How you summon Portal, and what it needs from macOS.")
+            PageHeader(title: "General", subtitle: "How you summon Portal, and what it needs from macOS.")
             Form {
                 Section {
                     LabeledContent("Launcher") {
@@ -530,39 +770,24 @@ private struct ShortcutsPage: View {
                 }
 
                 Section {
-                    LabeledContent("Open with") {
-                        Picker("", selection: $settings.values.finderSelectionAppPath) {
-                            ForEach(finderApps, id: \.self) { path in
-                                Label { Text(OpenWithApps.name(path)) } icon: { Image(nsImage: IconCache.menuIcon(forPath: path)) }
-                                    .tag(path)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                    LabeledContent("Hotkey") {
-                        HotKeyRecorder(combo: $settings.values.finderSelectionHotKey, placeholder: "Record Hotkey")
-                    }
-                } header: {
-                    Text("Finder Selection")
-                } footer: {
-                    Text("Open the launcher while Finder is in front and the selected folder is the first result. The hotkey skips the launcher. Selected files open their folder; with nothing selected, the front window's folder is used.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section {
                     Toggle("Show apps in the launcher", isOn: $settings.values.includeApps)
                 } footer: {
                     Text("\(launcher.appCount) apps found in /Applications.").font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section {
+                    Toggle("Show Portal in the menu bar", isOn: $settings.values.showMenuBarIcon)
                     Toggle("Open Portal at login", isOn: $launchAtLogin)
                         .onChange(of: launchAtLogin) { _, on in
                             do { try LoginItem.set(on); loginError = nil }
                             catch { loginError = error.localizedDescription; launchAtLogin = LoginItem.isEnabled }
                         }
                     if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
+                } footer: {
+                    if !settings.values.showMenuBarIcon {
+                        Text("With the icon hidden, open Settings by typing “settings” in the launcher, or by opening Portal again from Finder or Spotlight.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {
@@ -593,13 +818,6 @@ private struct ShortcutsPage: View {
             axGranted = Permissions.accessibilityGranted
             tick += 1
         }
-    }
-
-    private var finderApps: [String] {
-        var apps = OpenWithApps.installed.filter { !$0.hasSuffix("Finder.app") }
-        let current = settings.values.finderSelectionAppPath
-        if !apps.contains(current) { apps.insert(current, at: 0) }
-        return apps
     }
 
     @ViewBuilder

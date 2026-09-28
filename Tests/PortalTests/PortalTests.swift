@@ -162,3 +162,39 @@ import CryptoKit
         #expect(TerminalText.clean(list, unwrap: true) == list)
     }
 }
+
+@Suite struct OpenWithTests {
+    @Test func legacyFinderAppBecomesDefaultFolderApp() throws {
+        let json = #"{"finderSelectionAppPath":"/Applications/Sublime Text.app"}"#
+        let s = try JSONDecoder().decode(SharedSettings.self, from: Data(json.utf8))
+        #expect(s.folderOpenWith.first == "/Applications/Sublime Text.app")
+        #expect(s.folderOpenWith.filter { $0 == "/Applications/Sublime Text.app" }.count == 1)
+    }
+
+    @Test func savedListsWinOverLegacy() throws {
+        let json = #"{"finderSelectionAppPath":"/x/Old.app","folderOpenWith":["/x/New.app"]}"#
+        let s = try JSONDecoder().decode(SharedSettings.self, from: Data(json.utf8))
+        #expect(s.folderOpenWith == ["/x/New.app"])
+    }
+}
+
+@Suite struct FinderClassifyTests {
+    @Test func foldersFilesAndExcludedTypes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portal-classify-\(UUID().uuidString)")
+        let folder = root.appendingPathComponent("project")
+        let app = root.appendingPathComponent("Thing.app")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let readme = folder.appendingPathComponent("README.md")
+        let png = folder.appendingPathComponent("shot.PNG")
+        try Data().write(to: readme)
+        try Data().write(to: png)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (folders, files) = FinderSelection.classify(
+            [folder.path, readme.path, png.path, app.path], excludedTypes: [".png", "app"])
+        // The png is excluded → its folder, which is already listed, so no duplicate.
+        #expect(folders.map(\.lastPathComponent) == ["project", root.lastPathComponent])
+        #expect(files.map(\.lastPathComponent) == ["README.md"])
+    }
+}

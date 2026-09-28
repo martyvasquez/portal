@@ -88,7 +88,18 @@ struct SharedSettings: Codable, Equatable {
                   appPath: "/Applications/Google Chrome.app"),
     ]
     var includeApps = true
-    var finderSelectionAppPath = "/Applications/Ghostty.app"
+    var showMenuBarIcon = true
+    /// Apps offered for what's selected in Finder, in order; the first is the default.
+    var folderOpenWith: [String] = SharedSettings.installed([
+        "/Applications/Ghostty.app", "/System/Applications/Utilities/Terminal.app", "/Applications/Sublime Text.app",
+    ])
+    var fileOpenWith: [String] = SharedSettings.installed([
+        "/Applications/Sublime Text.app", "/System/Applications/TextEdit.app",
+    ])
+    /// Files of these types get their folder's apps instead of the file apps.
+    var excludedFileTypes: [String] = [
+        "png", "jpg", "jpeg", "gif", "heic", "webp", "pdf", "mov", "mp4", "mp3", "wav", "zip", "dmg", "pkg", "app",
+    ]
     var finderSelectionHotKey: KeyCombo?
 
     var clipboardRetentionDays = 7
@@ -103,6 +114,17 @@ struct SharedSettings: Codable, Equatable {
 
     init() {}
 
+    private enum LegacyKeys: String, CodingKey { case finderSelectionAppPath }
+
+    static func installed(_ paths: [String]) -> [String] {
+        paths.filter { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    static func appName(_ path: String) -> String {
+        let n = FileManager.default.displayName(atPath: path)
+        return n.hasSuffix(".app") ? String(n.dropLast(4)) : n
+    }
+
     // Tolerate missing keys so older settings files keep working as fields are added.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -114,8 +136,17 @@ struct SharedSettings: Codable, Equatable {
         clipboardHotKey = v(.clipboardHotKey, d.clipboardHotKey)
         quicklinks = v(.quicklinks, d.quicklinks)
         includeApps = v(.includeApps, d.includeApps)
-        finderSelectionAppPath = v(.finderSelectionAppPath, d.finderSelectionAppPath)
+        showMenuBarIcon = v(.showMenuBarIcon, d.showMenuBarIcon)
+        folderOpenWith = v(.folderOpenWith, d.folderOpenWith)
+        fileOpenWith = v(.fileOpenWith, d.fileOpenWith)
+        excludedFileTypes = v(.excludedFileTypes, d.excludedFileTypes)
         finderSelectionHotKey = v(.finderSelectionHotKey, d.finderSelectionHotKey)
+
+        // Earlier versions had one app for the Finder selection; keep it as the default folder app.
+        if !c.contains(.folderOpenWith),
+           let legacy = try? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(String.self, forKey: .finderSelectionAppPath) {
+            folderOpenWith = [legacy] + folderOpenWith.filter { $0 != legacy }
+        }
         clipboardRetentionDays = v(.clipboardRetentionDays, d.clipboardRetentionDays)
         secretRetentionDays = v(.secretRetentionDays, d.secretRetentionDays)
         recordSecrets = v(.recordSecrets, d.recordSecrets)

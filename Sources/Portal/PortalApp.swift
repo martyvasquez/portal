@@ -59,6 +59,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .sink { [weak self] _ in self?.registerHotKeys() }
             .store(in: &cancellables)
 
+        settings.$values
+            .map(\.showMenuBarIcon)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] show in self?.statusItem.isVisible = show }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateFinderHotKey() }
+            .store(in: &cancellables)
+
         // Scriptable entry point, also handy for testing:
         //   swift -e 'import Foundation; DistributedNotificationCenter.default().postNotificationName(.init("com.martyvasquez.portal.show"), object: "launcher")'
         DistributedNotificationCenter.default().addObserver(forName: .init("com.martyvasquez.portal.show"), object: nil, queue: .main) { [weak self] note in
@@ -68,6 +81,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 case "launcher": self?.toggleLauncher()
                 case "clipboard": self?.toggleClipboard()
                 case "new": self?.run(command: "new")
+                case let t? where t.hasPrefix("page:"):
+                    if let page = SettingsPage.allCases.first(where: { "page:\($0)" == t }) { self?.router.page = page }
+                    self?.showSettings()
                 default: self?.showSettings()
                 }
             }
@@ -94,11 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HotKeyCenter.shared.register(id: 1, combo: settings.values.launcherHotKey) { [weak self] in self?.toggleLauncher() }
         HotKeyCenter.shared.register(id: 2, combo: settings.values.clipboardHotKey) { [weak self] in self?.toggleClipboard() }
 
-        if let combo = settings.values.finderSelectionHotKey {
-            HotKeyCenter.shared.register(id: 3, combo: combo) { [weak self] in self?.openFinderSelection() }
-        } else {
-            HotKeyCenter.shared.unregister(3)
-        }
+        updateFinderHotKey()
 
         linkHotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
         linkHotKeyIDs = []
@@ -110,13 +122,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// The Finder selection hotkey is only held while Finder is in front, so the same
+    /// combo (e.g. ⇧⌘O) keeps its normal meaning in every other app.
+    private func updateFinderHotKey() {
+        if let combo = settings.values.finderSelectionHotKey, FinderSelection.finderIsFrontmost {
+            HotKeyCenter.shared.register(id: 3, combo: combo) { [weak self] in self?.openFinderSelection() }
+        } else {
+            HotKeyCenter.shared.unregister(3)
+        }
+    }
+
     /// Hotkey version: open whatever's selected in Finder without the launcher.
     private func openFinderSelection() {
-        guard FinderSelection.finderIsFrontmost, let result = FinderSelection.current() else {
+        let v = settings.values
+        guard FinderSelection.finderIsFrontmost, let result = FinderSelection.current(excludedTypes: v.excludedFileTypes) else {
             NSSound.beep()
             return
         }
-        FinderSelection.open(result.folders, withAppAt: settings.values.finderSelectionAppPath)
+        // Each kind opens with its first (default) app.
+        if let app = v.folderOpenWith.first { FinderSelection.open(result.folders, withAppAt: app) }
+        if let app = v.fileOpenWith.first { FinderSelection.open(result.files, withAppAt: app) }
     }
 
     /// A {query} quicklink opens the launcher to ask for its text; others open immediately.

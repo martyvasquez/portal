@@ -203,9 +203,10 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var appCount = 0
     /// A quicklink with `{query}` waiting for its argument.
     @Published private(set) var pending: Quicklink?
-    /// Folders selected in Finder when the launcher opened.
-    @Published private(set) var finderFolders: [URL] = []
-    private var finderFromSelection = true
+    /// What was selected in Finder when the launcher opened.
+    @Published private(set) var finder: FinderSelection.Result?
+    /// Launcher row id → (items to open, app to open them with).
+    private var finderTargets: [String: (urls: [URL], app: String)] = [:]
 
     var onCommand: (String) -> Void = { _ in }
     var onDismiss: () -> Void = {}
@@ -262,36 +263,42 @@ final class LauncherModel: ObservableObject {
     func prepareForShow() {
         pending = nil
         query = ""
-        finderFolders = []
+        finder = nil
         let askFinder = FinderSelection.finderIsFrontmost
         search()
         // Ask Finder after the panel is on screen so it opens instantly.
         if askFinder {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let result = FinderSelection.current() else { return }
-                    self.finderFolders = result.folders
-                    self.finderFromSelection = result.fromSelection
-                    self.search()
+                    self.finder = FinderSelection.current(excludedTypes: self.settings.values.excludedFileTypes)
+                    if self.finder != nil { self.search() }
                 }
             }
         }
     }
 
-    var finderAppName: String {
-        let n = FileManager.default.displayName(atPath: settings.values.finderSelectionAppPath)
-        return n.hasSuffix(".app") ? String(n.dropLast(4)) : n
-    }
-
-    private var finderItems: [LaunchItem] {
-        let app = finderAppName
-        return finderFolders.map { url in
-            var item = LaunchItem(id: "finder:\(url.path)", name: "Open “\(url.lastPathComponent)” in \(app)",
-                                  subtitle: Paths.abbreviate(url.path), path: url.path, kind: .finder,
-                                  keywords: "finder selection \(app) terminal")
-            item.openWith = settings.values.finderSelectionAppPath
-            return item
+    /// One row per app, in the order set in Settings → Open With: folder apps, then file apps.
+    private func makeFinderItems() -> [LaunchItem] {
+        finderTargets = [:]
+        guard let finder else { return [] }
+        var items: [LaunchItem] = []
+        func rows(_ urls: [URL], apps: [String], noun: String) {
+            guard !urls.isEmpty else { return }
+            let what = urls.count == 1 ? "“\(urls[0].lastPathComponent)”" : "\(urls.count) \(noun)s"
+            let subtitle = urls.count == 1 ? Paths.abbreviate(urls[0].path) : urls.map(\.lastPathComponent).joined(separator: ", ")
+            for app in apps {
+                let name = SharedSettings.appName(app)
+                let id = "finder:\(noun):\(app)"
+                var item = LaunchItem(id: id, name: "Open \(what) in \(name)", subtitle: subtitle,
+                                      path: urls[0].path, kind: .finder, keywords: "finder selection \(noun) \(name)")
+                item.openWith = app
+                finderTargets[id] = (urls, app)
+                items.append(item)
+            }
         }
+        rows(finder.folders, apps: settings.values.folderOpenWith, noun: "folder")
+        rows(finder.files, apps: settings.values.fileOpenWith, noun: "file")
+        return items
     }
 
     private var quicklinkItems: [LaunchItem] {
@@ -312,7 +319,7 @@ final class LauncherModel: ObservableObject {
         let gen = generation
         let q = Array(query.trimmingCharacters(in: .whitespaces).lowercased().utf8)
         let links = quicklinkItems
-        let finder = finderItems
+        let finder = makeFinderItems()
         let items = finder + Self.commands + links + apps
         let usage = usage.entries
         DispatchQueue.global(qos: .userInitiated).async {
@@ -403,14 +410,12 @@ final class LauncherModel: ObservableObject {
         switch item.kind {
         case .finder:
             onDismiss()
-            let url = URL(fileURLWithPath: item.path)
+            guard let target = finderTargets[item.id] else { return }
             if action == .copy {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(item.path, forType: .string)
-            } else if action == .alternate {
-                FinderSelection.open(finderFolders, withAppAt: settings.values.finderSelectionAppPath)
+                NSPasteboard.general.setString(target.urls.map(\.path).joined(separator: "\n"), forType: .string)
             } else {
-                FinderSelection.open([url], withAppAt: settings.values.finderSelectionAppPath)
+                FinderSelection.open(target.urls, withAppAt: target.app)
             }
         case .command:
             usage.record(item.id)
@@ -449,10 +454,7 @@ final class LauncherModel: ObservableObject {
         guard let item else { return [("⎋", "Close")] }
         switch item.kind {
         case .finder:
-            var hints = [("↩", "Open in \(finderAppName)")]
-            if finderFolders.count > 1 { hints.append(("⌘↩", "Open All \(finderFolders.count)")) }
-            hints.append(("⌥↩", "Copy Path"))
-            return hints
+            return [("↩", "Open"), ("⌥↩", "Copy Path")]
         case .quicklink:
             guard let link = quicklink(for: item) else { return [] }
             if link.needsQuery { return [("↩", "Enter Query"), ("⌥↩", "Copy Link")] }
