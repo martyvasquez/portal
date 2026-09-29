@@ -58,6 +58,13 @@ final class ClipboardModel: ObservableObject {
         selection = (selection + delta + count) % count
     }
 
+    /// ⇧⌘↑ / ⇧⌘↓: previous or next sidebar filter. Stops at the ends, like Managed's sidebar.
+    func stepFilter(_ delta: Int) {
+        let all = ClipFilter.allCases
+        guard let i = all.firstIndex(of: filter), all.indices.contains(i + delta) else { return }
+        filter = all[i + delta]
+    }
+
     func cycleFilter(_ delta: Int) {
         let all = ClipFilter.allCases
         let i = all.firstIndex(of: filter) ?? 0
@@ -79,6 +86,10 @@ final class ClipboardModel: ObservableObject {
     func handleKey(_ e: NSEvent) -> Bool {
         let flags = e.modifierFlags.intersection([.command, .option, .control, .shift])
         let chars = e.charactersIgnoringModifiers?.lowercased() ?? ""
+        if flags == [.command, .shift], e.keyCode == 125 || e.keyCode == 126 {
+            stepFilter(e.keyCode == 125 ? 1 : -1)
+            return true
+        }
         switch Int(e.keyCode) {
         case 125: move(1); return true
         case 126: move(-1); return true
@@ -257,6 +268,7 @@ struct ClipboardView: View {
             if model.selected?.isSecret == true { KeyHint(keys: "⌘R", label: "Reveal") }
             if model.selected?.payload.originalText != nil { KeyHint(keys: "⇧↩", label: "Original") }
             KeyHint(keys: "⌘⌫", label: "Delete")
+            KeyHint(keys: "⇧⌘↑↓", label: "Filter")
         }
         .padding(.horizontal, 14)
         .frame(height: 34)
