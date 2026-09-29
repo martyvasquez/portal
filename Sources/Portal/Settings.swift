@@ -81,6 +81,7 @@ struct SharedSettings: Codable, Equatable {
     var launcherHotKey = KeyCombo.launcherDefault
     var clipboardHotKey = KeyCombo.clipboardDefault
 
+    var snippets: [Snippet] = []
     var quicklinks: [Quicklink] = [
         Quicklink(name: "Development", link: "~/Development", appPath: "/Applications/Ghostty.app"),
         Quicklink(name: "Development in Finder", link: "~/Development"),
@@ -134,6 +135,7 @@ struct SharedSettings: Codable, Equatable {
         }
         launcherHotKey = v(.launcherHotKey, d.launcherHotKey)
         clipboardHotKey = v(.clipboardHotKey, d.clipboardHotKey)
+        snippets = v(.snippets, d.snippets)
         quicklinks = v(.quicklinks, d.quicklinks)
         includeApps = v(.includeApps, d.includeApps)
         showMenuBarIcon = v(.showMenuBarIcon, d.showMenuBarIcon)

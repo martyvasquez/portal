@@ -5,6 +5,12 @@ A small personal quicklinks launcher + clipboard manager for macOS (replacing Ra
 - **Quicklinks** (managed in Settings): a name, a folder or URL, and the app it opens in
   (Finder, Ghostty, Chrome, anything). Optional global hotkey per quicklink. Put `{query}`
   in a link to be asked for text when you open it.
+- **Snippets**: the launcher shows text to paste for where you are: the current folder's
+  snippets first (from `.portal.json`, found by walking up from the folder open in Finder,
+  Ghostty, or Terminal), then the front app's, then global ones (Settings → Snippets).
+  **Build / Update Commands** in the launcher seeds `.portal.json` from the repo's
+  `package.json` scripts, Makefile/justfile targets, `scripts/*.sh`, and toolchain files;
+  after that it's your file to edit. Updates only add new commands, never re-add deleted ones.
 - **Open With** (Settings → Open With): with Finder in front, the launcher offers apps for
   the selection: one ordered list for folders (e.g. Ghostty → Terminal → Sublime Text), one
   for files. The first app is the default. Excluded file types (images, PDFs, archives, …)

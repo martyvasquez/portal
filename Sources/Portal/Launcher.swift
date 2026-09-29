@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-enum LaunchKind: Sendable { case finder, quicklink, app, command }
+enum LaunchKind: Sendable { case finder, snippet, folderAction, quicklink, app, command }
 
 struct LaunchItem: Identifiable, Hashable, Sendable {
     let id: String          // quicklink UUID, app path, or "cmd:<name>"
@@ -15,6 +15,9 @@ struct LaunchItem: Identifiable, Hashable, Sendable {
     var quicklinkID: UUID?
     var hotKey: String?
     var openWith: String?
+    var snippetText: String?
+    /// Launcher section this row belongs to; defaults to one per kind.
+    var section: String?
 
     init(id: String, name: String, subtitle: String = "", path: String, kind: LaunchKind,
          symbol: String? = nil, keywords: String = "") {
@@ -205,6 +208,10 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var pending: Quicklink?
     /// What was selected in Finder when the launcher opened.
     @Published private(set) var finder: FinderSelection.Result?
+    /// The app the launcher was opened over, and the folder it's in (if it can tell).
+    @Published private(set) var context = SnippetContext()
+    /// One-line result of the last folder action, shown in the footer.
+    @Published private(set) var notice: String?
     /// Launcher row id → (items to open, app to open them with).
     private var finderTargets: [String: (urls: [URL], app: String)] = [:]
 
@@ -264,17 +271,68 @@ final class LauncherModel: ObservableObject {
         pending = nil
         query = ""
         finder = nil
-        let askFinder = FinderSelection.finderIsFrontmost
+        notice = nil
+        let front = NSWorkspace.shared.frontmostApplication
+        context = SnippetContext(appID: front?.bundleIdentifier, appName: front?.localizedName)
         search()
-        // Ask Finder after the panel is on screen so it opens instantly.
-        if askFinder {
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
+        // Ask Finder/Ghostty/Terminal after the panel is on screen so it opens instantly.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                if FinderSelection.finderIsFrontmost {
                     self.finder = FinderSelection.current(excludedTypes: self.settings.values.excludedFileTypes)
-                    if self.finder != nil { self.search() }
                 }
+                if let folder = FolderContext.current(frontApp: self.context.appID) {
+                    self.context.load(folder: folder)
+                }
+                if self.finder != nil || self.context.folder != nil { self.search() }
             }
         }
+    }
+
+    /// Rows for snippets: this folder's (.portal.json), this app's, then global.
+    private func makeSnippetItems() -> (folder: [LaunchItem], app: [LaunchItem], global: [LaunchItem]) {
+        func row(_ id: String, _ name: String, _ text: String, section: String) -> LaunchItem {
+            var item = LaunchItem(id: id, name: name.isEmpty ? text : name, subtitle: name.isEmpty ? "" : text,
+                                  path: "", kind: .snippet, symbol: "text.insert", keywords: text)
+            item.snippetText = text
+            item.section = section
+            return item
+        }
+        var folder: [LaunchItem] = []
+        if let root = context.root {
+            let section = "Snippets · \(root.lastPathComponent)"
+            if let error = context.fileError {
+                var item = LaunchItem(id: "folder:fix", name: "Fix \(PortalFile.name)", subtitle: error,
+                                      path: "", kind: .folderAction, symbol: "exclamationmark.triangle")
+                item.section = section
+                folder.append(item)
+            }
+            for (i, s) in (context.file?.snippets ?? []).enumerated() {
+                folder.append(row("folder:\(i):\(s.text)", s.name, s.text, section: section))
+            }
+            let seedName = context.file == nil ? "Build Commands for \(root.lastPathComponent)"
+                                               : "Update Commands for \(root.lastPathComponent)"
+            var seed = LaunchItem(id: "folder:seed", name: seedName,
+                                  subtitle: "Adds the repo's scripts and tasks to \(PortalFile.name)",
+                                  path: "", kind: .folderAction, symbol: "arrow.triangle.2.circlepath",
+                                  keywords: "build update seed generate commands snippets")
+            seed.section = section
+            folder.append(seed)
+            if context.file != nil {
+                var editRow = LaunchItem(id: "folder:edit", name: "Edit Snippets for \(root.lastPathComponent)",
+                                         subtitle: Paths.abbreviate(root.appendingPathComponent(PortalFile.name).path),
+                                         path: "", kind: .folderAction, symbol: "pencil",
+                                         keywords: "edit snippets portal json")
+                editRow.section = section
+                folder.append(editRow)
+            }
+        }
+        let all = settings.values.snippets
+        let appName = context.appName ?? "This App"
+        let app = all.filter { s in context.appID.map { s.apps.contains($0) } ?? false }
+            .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets · \(appName)") }
+        let global = all.filter(\.isGlobal).map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets") }
+        return (folder, app, global)
     }
 
     /// One row per app, in the order set in Settings → Open With: folder apps, then file apps.
@@ -320,13 +378,15 @@ final class LauncherModel: ObservableObject {
         let q = Array(query.trimmingCharacters(in: .whitespaces).lowercased().utf8)
         let links = quicklinkItems
         let finder = makeFinderItems()
-        let items = finder + Self.commands + links + apps
+        let snippets = makeSnippetItems()
+        let snippetRows = snippets.folder + snippets.app + snippets.global
+        let items = finder + snippetRows + Self.commands + links + apps
         let usage = usage.entries
         DispatchQueue.global(qos: .userInitiated).async {
             let ranked: [LaunchItem]
             if q.isEmpty {
                 // Quicklinks in the order you arranged them, then recently used apps.
-                ranked = finder + links + Ranker.rank(query: [], items: items.filter { $0.kind == .app }, usage: usage, limit: 5)
+                ranked = finder + snippetRows + links + Ranker.rank(query: [], items: items.filter { $0.kind == .app }, usage: usage, limit: 5)
             } else {
                 ranked = Ranker.rank(query: q, items: items, usage: usage, limit: 60)
             }
@@ -352,6 +412,13 @@ final class LauncherModel: ObservableObject {
     func move(_ delta: Int) {
         guard !results.isEmpty else { return }
         selection = (selection + delta + results.count) % results.count
+    }
+
+    func showNotice(_ text: String) {
+        notice = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            if self?.notice == text { self?.notice = nil }
+        }
     }
 
     func cancelPending() {
@@ -408,6 +475,18 @@ final class LauncherModel: ObservableObject {
     func perform(_ action: LaunchAction, item: LaunchItem? = nil) {
         guard let item = item ?? selectedItem else { return }
         switch item.kind {
+        case .snippet:
+            guard let text = item.snippetText else { return }
+            onDismiss()
+            usage.record(item.id)
+            // Pasting into Finder does nothing useful, so there it copies.
+            if action == .copy || context.appID == "com.apple.finder" {
+                SnippetPaster.copy(text)
+            } else {
+                SnippetPaster.paste(text)
+            }
+        case .folderAction:
+            performFolderAction(item.id)
         case .finder:
             onDismiss()
             guard let target = finderTargets[item.id] else { return }
@@ -453,6 +532,10 @@ final class LauncherModel: ObservableObject {
         if let pending { return [("↩", "Open in \(pending.appName)"), ("⎋", "Back")] }
         guard let item else { return [("⎋", "Close")] }
         switch item.kind {
+        case .snippet:
+            return context.appID == "com.apple.finder" ? [("↩", "Copy")] : [("↩", "Paste"), ("⌥↩", "Copy")]
+        case .folderAction:
+            return [("↩", item.id == "folder:seed" ? "Scan Repo" : "Open File")]
         case .finder:
             return [("↩", "Open"), ("⌥↩", "Copy Path")]
         case .quicklink:
@@ -466,6 +549,64 @@ final class LauncherModel: ObservableObject {
             return [("↩", "Open"), ("⌘↩", "Show in Finder")]
         case .command:
             return [("↩", "Run")]
+        }
+    }
+}
+
+// MARK: - Snippet context
+
+/// The app the launcher opened over and, when known, its folder and `.portal.json`.
+struct SnippetContext {
+    var appID: String?
+    var appName: String?
+    var folder: URL?
+    /// Where `.portal.json` lives (or would be created): the existing file's folder, else the git root.
+    var root: URL?
+    var file: PortalFile?
+    var fileError: String?
+
+    mutating func load(folder: URL) {
+        self.folder = folder
+        file = nil
+        fileError = nil
+        if let url = PortalFile.find(from: folder) {
+            root = url.deletingLastPathComponent()
+            do { file = try PortalFile.load(url) } catch { fileError = Self.describe(error) }
+        } else {
+            root = PortalFile.projectRoot(for: folder)
+        }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if case PortalFile.LoadError.invalid(_, let why) = error { return why }
+        let text = (error as NSError).userInfo[NSDebugDescriptionErrorKey] as? String ?? error.localizedDescription
+        return "Not valid JSON: \(text)"
+    }
+}
+
+extension LauncherModel {
+    fileprivate func performFolderAction(_ id: String) {
+        guard let root = context.root else { return }
+        let file = root.appendingPathComponent(PortalFile.name)
+        switch id {
+        case "folder:seed":
+            do {
+                let added = try PortalFile.seed(at: root, with: CommandDetector.detect(in: root))
+                context.load(folder: context.folder ?? root)
+                showNotice(added == 0 ? "No new commands found in \(root.lastPathComponent)"
+                                      : "Added \(added) command\(added == 1 ? "" : "s") to \(PortalFile.name)")
+                search()
+            } catch {
+                NSSound.beep()
+                showNotice("Couldn't update \(PortalFile.name): fix it first")
+            }
+        default: // edit or fix: open the file in the first Files app
+            onDismiss()
+            if let app = settings.values.fileOpenWith.first {
+                FinderSelection.open([file], withAppAt: app)
+            } else {
+                NSWorkspace.shared.open(file)
+            }
         }
     }
 }

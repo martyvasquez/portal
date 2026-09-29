@@ -42,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>Portal reads the folder you've selected in Finder so it can open it in Ghostty.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Portal asks Finder, Ghostty, and Terminal which folder you're in, to open it with your apps and show that folder's snippets.</string>
     <key>NSHumanReadableCopyright</key><string>Personal build</string>
 </dict>
 </plist>

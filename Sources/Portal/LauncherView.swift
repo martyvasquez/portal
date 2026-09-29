@@ -38,7 +38,7 @@ struct LauncherView: View {
                     .foregroundStyle(.secondary)
             }
             SearchField(text: $model.query,
-                        placeholder: model.pending == nil ? "Quicklinks and apps" : "Type your query",
+                        placeholder: model.pending == nil ? "Snippets, quicklinks, and apps" : "Type your query",
                         fontSize: 17)
         }
         .padding(.horizontal, 16)
@@ -67,7 +67,7 @@ struct LauncherView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(model.results.enumerated()), id: \.element.id) { index, item in
                         if showsHeader(at: index) {
-                            SectionTitle(text: header(for: item.kind))
+                            SectionTitle(text: header(for: item))
                                 .padding(.top, index == 0 ? 2 : 12)
                         }
                         LaunchRow(item: item, link: model.quicklink(for: item), index: index,
@@ -90,20 +90,28 @@ struct LauncherView: View {
     }
 
     private func showsHeader(at index: Int) -> Bool {
-        index == 0 || model.results[index - 1].kind != model.results[index].kind
+        index == 0 || header(for: model.results[index - 1]) != header(for: model.results[index])
     }
 
-    private func header(for kind: LaunchKind) -> String {
-        switch kind {
-        case .finder: "Finder Selection"
-        case .quicklink: "Quicklinks"
-        case .app: model.query.isEmpty ? "Recent Apps" : "Apps"
-        case .command: "Portal"
+    private func header(for item: LaunchItem) -> String {
+        if let section = item.section { return section }
+        switch item.kind {
+        case .finder: return "Finder Selection"
+        case .snippet, .folderAction: return "Snippets"
+        case .quicklink: return "Quicklinks"
+        case .app: return model.query.isEmpty ? "Recent Apps" : "Apps"
+        case .command: return "Portal"
         }
     }
 
     private var footer: some View {
         HStack(spacing: 14) {
+            if let notice = model.notice {
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
+            }
             Spacer()
             ForEach(model.hints(for: model.selectedItem), id: \.0) { KeyHint(keys: $0.0, label: $0.1) }
         }

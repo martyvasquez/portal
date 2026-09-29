@@ -2,13 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general = "General", quicklinks = "Quicklinks", openWith = "Open With", clipboard = "Clipboard", sync = "Sync"
+    case general = "General", quicklinks = "Quicklinks", snippets = "Snippets", openWith = "Open With", clipboard = "Clipboard", sync = "Sync"
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
         case .quicklinks: "link"
         case .openWith: "arrow.up.forward.app"
+        case .snippets: "text.insert"
         case .clipboard: "doc.on.clipboard"
         case .general: "gearshape"
         case .sync: "icloud"
@@ -19,6 +20,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .quicklinks: Theme.accent
         case .openWith: .orange
+        case .snippets: .pink
         case .clipboard: .teal
         case .general: .gray
         case .sync: .green
@@ -54,6 +56,7 @@ struct SettingsView: View {
                 switch router.page {
                 case .quicklinks: QuicklinksPage(settings: settings, router: router)
                 case .openWith: OpenWithPage(settings: settings)
+                case .snippets: SnippetsPage(settings: settings)
                 case .clipboard: ClipboardPage(settings: settings, store: store)
                 case .general: GeneralPage(settings: settings, launcher: launcher)
                 case .sync: SyncPage(settings: settings, store: store, keys: keys)
@@ -75,7 +78,8 @@ struct SettingsView: View {
             ForEach(SettingsPage.allCases) { page in
                 SidebarRow(title: page.rawValue, symbol: page.symbol, tint: page.tint,
                            isSelected: router.page == page,
-                           badge: page == .quicklinks ? settings.values.quicklinks.count : 0)
+                           badge: page == .quicklinks ? settings.values.quicklinks.count
+                                : page == .snippets ? settings.values.snippets.count : 0)
                     .onTapGesture { router.page = page }
             }
             Spacer()
@@ -438,6 +442,255 @@ private struct QuicklinkEditor: View {
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url { link.appPath = url.path }
+    }
+}
+
+// MARK: - Snippets
+
+private struct SnippetsPage: View {
+    @ObservedObject var settings: SettingsStore
+    @State private var editing: SnippetDraft?
+    @State private var selected: UUID?
+
+    /// Global first, then one group per app, alphabetically.
+    private var groups: [(title: String, app: String?, snippets: [Snippet])] {
+        let all = settings.values.snippets
+        var result: [(String, String?, [Snippet])] = []
+        let global = all.filter(\.isGlobal)
+        if !global.isEmpty { result.append(("Everywhere", nil, global)) }
+        let apps = Set(all.flatMap(\.apps)).sorted { Self.appName($0) < Self.appName($1) }
+        for app in apps { result.append((Self.appName(app), app, all.filter { $0.apps.contains(app) })) }
+        return result
+    }
+
+    static func appName(_ bundleID: String) -> String {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map { SharedSettings.appName($0.path) } ?? bundleID
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Snippets", subtitle: "Text the launcher pastes into the app you're in.") {
+                Button {
+                    editing = SnippetDraft(snippet: Snippet(name: "", text: ""), isNew: true)
+                } label: {
+                    Label("New Snippet", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("n")
+            }
+
+            if settings.values.snippets.isEmpty {
+                ContentUnavailableView {
+                    Label("No Snippets", systemImage: "text.insert")
+                } description: {
+                    Text("Add text you paste often, everywhere or only in certain apps.")
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(groups, id: \.title) { group in
+                        HStack(spacing: 6) {
+                            if let app = group.app, let icon = IconCache.appIcon(bundleID: app) {
+                                Image(nsImage: icon).resizable().frame(width: 14, height: 14)
+                            } else {
+                                Image(systemName: "globe").foregroundStyle(Theme.accent).imageScale(.small)
+                            }
+                            Text(group.title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 2)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+
+                        ForEach(group.snippets.map { SnippetEntry(group: group.title, snippet: $0) }) { entry in
+                            SnippetCard(snippet: entry.snippet, isSelected: selected == entry.snippet.id)
+                                .onTapGesture(count: 2) { edit(entry.snippet) }
+                                .onTapGesture { selected = entry.snippet.id }
+                                .contextMenu {
+                                    Button("Edit…") { edit(entry.snippet) }
+                                    Divider()
+                                    Button("Delete", role: .destructive) { delete(entry.snippet) }
+                                }
+                                .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .onDeleteCommand {
+                    if let id = selected, let s = settings.values.snippets.first(where: { $0.id == id }) { delete(s) }
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "folder").foregroundStyle(.blue)
+                Text("Folder snippets live in **\(PortalFile.name)** in each repo, so they travel with git. In the launcher, **Build Commands** creates one from the repo's scripts; then edit it like any file.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .sheet(item: $editing) { draft in
+            SnippetEditor(draft: draft, settings: settings) { editing = nil }
+        }
+    }
+
+    private func edit(_ s: Snippet) {
+        selected = s.id
+        editing = SnippetDraft(snippet: s, isNew: false)
+    }
+
+    private func delete(_ s: Snippet) {
+        withAnimation(Motion.standard) { settings.values.snippets.removeAll { $0.id == s.id } }
+    }
+}
+
+private struct SnippetEntry: Identifiable {
+    let group: String
+    let snippet: Snippet
+    var id: String { "\(group)|\(snippet.id)" }   // a snippet can appear under several apps
+}
+
+private struct SnippetDraft: Identifiable {
+    var snippet: Snippet
+    let isNew: Bool
+    var id: UUID { snippet.id }
+}
+
+private struct SnippetCard: View {
+    let snippet: Snippet
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "text.insert").foregroundStyle(.pink).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(snippet.title).lineLimit(1)
+                if !snippet.name.isEmpty {
+                    Text(snippet.text).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 12)
+            if snippet.apps.count > 1 { Pill(text: "\(snippet.apps.count) apps") }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .card(isSelected: isSelected)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct SnippetEditor: View {
+    @State private var snippet: Snippet
+    let isNew: Bool
+    @ObservedObject var settings: SettingsStore
+    let dismiss: () -> Void
+
+    init(draft: SnippetDraft, settings: SettingsStore, dismiss: @escaping () -> Void) {
+        _snippet = State(initialValue: draft.snippet)
+        isNew = draft.isNew
+        self.settings = settings
+        self.dismiss = dismiss
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TextField("Name (optional)", text: $snippet.name)
+                .textFieldStyle(.plain)
+                .font(.title2.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Text").foregroundStyle(.secondary)
+                TextEditor(text: $snippet.text)
+                    .font(.body.monospaced())
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 90, maxHeight: 180)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Show in", selection: everywhere) {
+                    Text("Every app").tag(true)
+                    Text("Only these apps").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                if !snippet.apps.isEmpty || !everywhere.wrappedValue {
+                    HStack(spacing: 6) {
+                        ForEach(snippet.apps, id: \.self) { id in
+                            HStack(spacing: 5) {
+                                if let icon = IconCache.appIcon(bundleID: id) {
+                                    Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+                                }
+                                Text(SnippetsPage.appName(id))
+                                Button { snippet.apps.removeAll { $0 == id } } label: {
+                                    Image(systemName: "xmark").font(.caption2.weight(.bold))
+                                }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        Button("Add App…", action: addApp)
+                    }
+                }
+            }
+
+            HStack {
+                if !isNew {
+                    Button("Delete", role: .destructive) {
+                        settings.values.snippets.removeAll { $0.id == snippet.id }
+                        dismiss()
+                    }
+                    .tint(.red)
+                }
+                Spacer()
+                Button("Cancel", role: .cancel, action: dismiss).keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add Snippet" : "Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(snippet.text.isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+        .tint(Theme.accent)
+    }
+
+    @State private var onlyTheseApps = false
+
+    private var everywhere: Binding<Bool> {
+        Binding(get: { snippet.apps.isEmpty && !onlyTheseApps },
+                set: { value in
+                    onlyTheseApps = !value
+                    if value { snippet.apps = [] } else if snippet.apps.isEmpty { addApp() }
+                })
+    }
+
+    private func addApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let id = Bundle(url: url)?.bundleIdentifier, !snippet.apps.contains(id) { snippet.apps.append(id) }
+        }
+    }
+
+    private func save() {
+        if let i = settings.values.snippets.firstIndex(where: { $0.id == snippet.id }) {
+            settings.values.snippets[i] = snippet
+        } else {
+            settings.values.snippets.append(snippet)
+        }
+        dismiss()
     }
 }
 

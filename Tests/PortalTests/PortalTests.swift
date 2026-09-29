@@ -198,3 +198,76 @@ import CryptoKit
         #expect(files.map(\.lastPathComponent) == ["README.md"])
     }
 }
+
+@Suite struct FolderSnippetTests {
+    private func makeRepo() throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("portal-repo-\(UUID().uuidString)")
+        let fm = FileManager.default
+        try fm.createDirectory(at: root.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: root.appendingPathComponent("Sources/App"), withIntermediateDirectories: true)
+        try #"{"scripts":{"lint":"eslint .","dev":"vite","build":"vite build"}}"#.write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try Data().write(to: root.appendingPathComponent("pnpm-lock.yaml"))
+        try "build:\n\tswift build\n.PHONY: build\ndeploy: build\n\t./deploy\nVAR := 1\n".write(to: root.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        try "#!/bin/sh\n".write(to: root.appendingPathComponent("scripts/build.sh"), atomically: true, encoding: .utf8)
+        try Data().write(to: root.appendingPathComponent("Package.swift"))
+        return root
+    }
+
+    @Test func detectsCommonCommands() throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let texts = CommandDetector.detect(in: root).map(\.text)
+        #expect(texts == ["pnpm dev", "pnpm build", "pnpm lint", "make build", "make deploy",
+                          "scripts/build.sh", "swift build", "swift test"])
+    }
+
+    @Test func seedAddsOnlyNewAndRespectsEditsAndDeletions() throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = try PortalFile.seed(at: root, with: CommandDetector.detect(in: root))
+        #expect(first == 8)
+
+        // Hand edits: rename one, delete another, add a custom command.
+        let url = root.appendingPathComponent(PortalFile.name)
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        var snippets = json["snippets"] as! [[String: Any]]
+        snippets[0]["name"] = "Dev server"
+        snippets.removeAll { $0["text"] as? String == "make deploy" }
+        snippets.append(["name": "Demo", "text": "open -n build/Debug/App.app --args -demo"])
+        json["snippets"] = snippets
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+
+        // A new script appears, then Update runs.
+        try #"{"scripts":{"lint":"eslint .","dev":"vite","build":"vite build","e2e":"playwright"}}"#
+            .write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        let second = try PortalFile.seed(at: root, with: CommandDetector.detect(in: root))
+        #expect(second == 1)
+
+        let file = try PortalFile.load(url)
+        let texts = file.snippets.map(\.text)
+        #expect(texts.contains("pnpm e2e"))
+        #expect(!texts.contains("make deploy"))                       // deleted stays deleted
+        #expect(file.snippets.first?.name == "Dev server")             // edit kept
+        #expect(texts.contains("open -n build/Debug/App.app --args -demo"))
+    }
+
+    @Test func findsFileFromSubfolderAndRootFromGit() throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sub = root.appendingPathComponent("Sources/App")
+        #expect(PortalFile.projectRoot(for: sub).standardizedFileURL == root.standardizedFileURL)
+        try PortalFile.seed(at: root, with: [("x", "echo x")])
+        #expect(PortalFile.find(from: sub)?.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL)
+    }
+
+    @Test func brokenFileIsReportedNotOverwritten() throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent(PortalFile.name)
+        try "{ not json".write(to: url, atomically: true, encoding: .utf8)
+        #expect(throws: (any Error).self) { try PortalFile.load(url) }
+        #expect(throws: (any Error).self) { try PortalFile.seed(at: root, with: [("x", "echo x")]) }
+        #expect(try String(contentsOf: url, encoding: .utf8) == "{ not json")
+    }
+}
