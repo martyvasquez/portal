@@ -43,13 +43,12 @@ afterwards; in Finder it copies instead. Snippets have one of four scopes:
 
 | Scope | Where it's defined | Shows when |
 |---|---|---|
-| **Folder** | `.portal.json` in the repo (travels with git) | the front app is in that folder or below it |
+| **Folder** | `.portal.json` in the repo (travels with git) | a terminal is in front and in that folder or below it |
 | **Site** | Settings → Snippets → Only These Sites | Chrome, Safari, Arc, Brave, or Edge is on a matching page |
 | **App** | Settings → Snippets → Only These Apps | that app is in front |
 | **Global** | Settings → Snippets → Every App | always |
 
-**How Portal knows the folder:**
-- **Finder**: the selection, or the front window's folder.
+**How Portal knows the folder** (terminals only; Finder gets Open With instead):
 - **Ghostty**: the focused terminal's working directory, from Ghostty's scripting interface.
 - **Terminal**: the front tab's shell directory, found through the tab's tty.
 
@@ -69,7 +68,7 @@ afterwards; in Finder it copies instead. Snippets have one of four scopes:
 }
 ```
 
-**Build / Update Commands** is a launcher row in any folder:
+**Build / Update Commands** is a launcher row whenever a terminal is in a folder:
 - It reads `package.json` scripts, using pnpm, yarn, or bun when that lockfile is present.
 - It also reads `Makefile`/`justfile` targets, `scripts/*.sh`, `bin/*`, and `Package.swift`, `Cargo.toml`, `project.yml`, and docker compose files.
 - It adds the new commands to `.portal.json`, and after that the file is yours to edit.

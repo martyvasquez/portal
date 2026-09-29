@@ -89,14 +89,11 @@ enum SiteMatcher {
 
 @MainActor
 enum FolderContext {
-    /// The folder the front app is working in, if it can tell us.
-    /// Finder: the selected folder (or the window's). Ghostty: the focused terminal's
-    /// working directory. Terminal: the front tab's shell directory.
+    /// The folder the front terminal is working in, if it can tell us. Folder snippets are
+    /// for typing commands, so only terminals count (Finder has Open With instead).
+    /// Ghostty: the focused terminal's working directory. Terminal: the front tab's shell directory.
     static func current(frontApp bundleID: String?) -> URL? {
         switch bundleID {
-        case "com.apple.finder":
-            let r = FinderSelection.current(excludedTypes: [])
-            return r?.folders.first ?? r?.files.first?.deletingLastPathComponent()
         case "com.mitchellh.ghostty":
             return run("tell application \"Ghostty\" to get working directory of focused terminal of selected tab of front window")
                 .map { URL(fileURLWithPath: $0) }
