@@ -157,16 +157,28 @@ private struct QuicklinksPage: View {
                 .frame(maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(settings.values.quicklinks) { link in
-                        QuicklinkCard(link: link, isSelected: selected == link.id,
-                                      edit: { edit(link) }, duplicate: { duplicate(link) }, delete: { delete(link) })
-                            .onTapGesture(count: 2) { edit(link) }
-                            .onTapGesture { selected = link.id }
-                            .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
+                    ForEach(groups, id: \.key) { group in
+                        HStack(spacing: 6) {
+                            group.icon.resizable().interpolation(.high).frame(width: 14, height: 14)
+                            Text(group.title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 2)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .moveDisabled(true)
+
+                        ForEach(group.links) { link in
+                            QuicklinkCard(link: link, isSelected: selected == link.id,
+                                          edit: { edit(link) }, duplicate: { duplicate(link) }, delete: { delete(link) })
+                                .onTapGesture(count: 2) { edit(link) }
+                                .onTapGesture { selected = link.id }
+                                .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                        .onMove { move(in: group, from: $0, to: $1) }
                     }
-                    .onMove { settings.values.quicklinks.move(fromOffsets: $0, toOffset: $1) }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -176,7 +188,7 @@ private struct QuicklinksPage: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "lightbulb").foregroundStyle(.yellow)
-                    Text("Drag to reorder. Put **{query}** in a link to type something when you open it, like `https://github.com/search?q={query}`.")
+                    Text("Grouped by the app each opens in. Drag to reorder within a group. Put **{query}** in a link to type something when you open it, like `https://github.com/search?q={query}`.")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -185,6 +197,29 @@ private struct QuicklinksPage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    /// Quicklinks grouped by the app they open in, alphabetically; within a group they keep
+    /// their saved order (which is also the launcher's order).
+    private var groups: [QuicklinkGroup] {
+        var byKey: [String: QuicklinkGroup] = [:]
+        for link in settings.values.quicklinks {
+            // Group by the app that actually opens it, so "Default (Finder)" and an explicit
+            // Finder land together (same for the default browser).
+            let key = QuicklinkGroup.resolvedApp(link)
+            byKey[key, default: QuicklinkGroup(appPath: key)].links.append(link)
+        }
+        return byKey.values.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    /// Reorders within one group by swapping the group's links among the slots they already
+    /// occupy in the full list, so other groups don't move.
+    private func move(in group: QuicklinkGroup, from source: IndexSet, to destination: Int) {
+        var reordered = group.links
+        reordered.move(fromOffsets: source, toOffset: destination)
+        let ids = Set(group.links.map(\.id))
+        var next = reordered.makeIterator()
+        settings.values.quicklinks = settings.values.quicklinks.map { ids.contains($0.id) ? next.next()! : $0 }
     }
 
     private func edit(_ link: Quicklink) {
@@ -204,6 +239,31 @@ private struct QuicklinksPage: View {
 
     private func delete(_ link: Quicklink) {
         withAnimation(Motion.standard) { settings.values.quicklinks.removeAll { $0.id == link.id } }
+    }
+}
+
+@MainActor
+private struct QuicklinkGroup {
+    let key: String
+    let title: String
+    let icon: Image
+    var links: [Quicklink] = []
+
+    init(appPath: String) {
+        key = appPath
+        title = appPath.isEmpty ? "Default Browser" : SharedSettings.appName(appPath)
+        icon = appPath.isEmpty ? Image(systemName: "globe") : Image(nsImage: IconCache.icon(forPath: appPath))
+    }
+
+    static let finder = "/System/Library/CoreServices/Finder.app"
+
+    /// The app path that will open this link ("" if there's no default browser).
+    static func resolvedApp(_ link: Quicklink) -> String {
+        if let app = link.appPath { return URL(fileURLWithPath: app).standardizedFileURL.path }
+        if link.isFolder { return finder }
+        guard let probe = URL(string: "https://example.com"),
+              let browser = NSWorkspace.shared.urlForApplication(toOpen: probe) else { return "" }
+        return browser.standardizedFileURL.path
     }
 }
 

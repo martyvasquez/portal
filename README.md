@@ -34,7 +34,8 @@ Type "settings", "clipboard", "new quicklink", or "quit" to run Portal's own com
 
 A name, a folder or URL, and the app it opens in (Finder, Ghostty, Chrome, any app). Each can
 have its own **global hotkey**. Put `{query}` in a link (`https://github.com/search?q={query}`)
-and the launcher asks for text before opening it. Drag cards to reorder.
+and the launcher asks for text before opening it. Settings groups them by the app they
+open in; drag within a group to reorder (the launcher lists them in that order).
 
 ### Snippets
 
