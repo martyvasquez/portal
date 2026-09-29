@@ -548,7 +548,7 @@ final class LauncherModel: ObservableObject {
             guard let link = quicklink(for: item) else { return [] }
             if link.needsQuery { return [("↩", "Enter Query"), ("⌥↩", "Copy Link")] }
             var hints = [("↩", "Open in \(link.appName)")]
-            if link.appPath != nil { hints.append(("⌘↩", link.isFolder ? "Finder" : "Default Browser")) }
+            if link.hasAlternateApp { hints.append(("⌘↩", link.isFolder ? "Finder" : "Default Browser")) }
             hints.append(("⌥↩", "Copy Link"))
             return hints
         case .app:

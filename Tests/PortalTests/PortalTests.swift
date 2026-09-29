@@ -306,3 +306,19 @@ import CryptoKit
         #expect(s.snippets[0].sites.isEmpty && s.snippets[0].isGlobal)
     }
 }
+
+@Suite struct QuicklinkAppTests {
+    @Test func defaultAndExplicitFinderAreTheSame() {
+        let implicit = Quicklink(name: "a", link: "~/Downloads")
+        let explicit = Quicklink(name: "b", link: "~/Development", appPath: Quicklink.finderPath)
+        #expect(implicit.resolvedAppPath == Quicklink.finderPath)
+        #expect(explicit.resolvedAppPath == Quicklink.finderPath)
+        #expect(!implicit.hasAlternateApp && !explicit.hasAlternateApp)   // ⌘↩ would just reopen Finder
+    }
+
+    @Test func otherAppHasFinderAsAlternate() {
+        let ghostty = Quicklink(name: "c", link: "~/Development/lsc-brain", appPath: "/Applications/Ghostty.app")
+        #expect(ghostty.resolvedAppPath == "/Applications/Ghostty.app")
+        #expect(ghostty.hasAlternateApp)
+    }
+}

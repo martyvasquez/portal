@@ -255,16 +255,8 @@ private struct QuicklinkGroup {
         icon = appPath.isEmpty ? Image(systemName: "globe") : Image(nsImage: IconCache.icon(forPath: appPath))
     }
 
-    static let finder = "/System/Library/CoreServices/Finder.app"
-
     /// The app path that will open this link ("" if there's no default browser).
-    static func resolvedApp(_ link: Quicklink) -> String {
-        if let app = link.appPath { return URL(fileURLWithPath: app).standardizedFileURL.path }
-        if link.isFolder { return finder }
-        guard let probe = URL(string: "https://example.com"),
-              let browser = NSWorkspace.shared.urlForApplication(toOpen: probe) else { return "" }
-        return browser.standardizedFileURL.path
-    }
+    static func resolvedApp(_ link: Quicklink) -> String { link.resolvedAppPath ?? "" }
 }
 
 private struct QuicklinkCard: View {

@@ -173,16 +173,13 @@ private struct LaunchRow: View {
     }
 }
 
-/// Folder icon for folder links; the "open with" app's icon for URLs.
+/// The icon of the app the link opens in (Finder for plain folder links), so the same
+/// app always looks the same whether it was picked explicitly or is the default.
 struct QuicklinkIcon: View {
     let link: Quicklink
     var body: some View {
-        if link.isFolder && link.appPath == nil {
-            Image(nsImage: IconCache.icon(forPath: Paths.expand(link.link).path)).resizable().interpolation(.high)
-        } else if let app = link.appPath {
+        if let app = link.resolvedAppPath {
             Image(nsImage: IconCache.icon(forPath: app)).resizable().interpolation(.high)
-        } else if let browser = IconCache.defaultBrowserIcon() {
-            Image(nsImage: browser).resizable().interpolation(.high)
         } else {
             Image(systemName: "link").foregroundStyle(Theme.accent)
         }

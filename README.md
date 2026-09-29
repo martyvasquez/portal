@@ -22,7 +22,7 @@ Type to filter everything. Results you open often and recently rank higher.
 | Key | Action |
 |---|---|
 | `↩` | Open, paste, or run the selected row |
-| `⌘↩` | Alternate: a quicklink with the default app (Finder or default browser); an app shown in Finder |
+| `⌘↩` | Alternate: a quicklink with the default app (Finder or default browser), when that's a different app; an app shown in Finder |
 | `⌥↩` | Copy the link, path, or snippet text |
 | `⌘1`–`⌘9` | Pick one of the first nine rows |
 | `⇥` | Fill in a `{query}` quicklink |
@@ -32,7 +32,8 @@ Type "settings", "clipboard", "new quicklink", or "quit" to run Portal's own com
 
 ### Quicklinks (Settings → Quicklinks)
 
-A name, a folder or URL, and the app it opens in (Finder, Ghostty, Chrome, any app). Each can
+A name, a folder or URL, and the app it opens in (Finder, Ghostty, Chrome, any app), shown
+with that app's icon. Each can
 have its own **global hotkey**. Put `{query}` in a link (`https://github.com/search?q={query}`)
 and the launcher asks for text before opening it. Settings groups them by the app they
 open in; drag within a group to reorder (the launcher lists them in that order).

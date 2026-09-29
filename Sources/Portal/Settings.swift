@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Combine
 import Carbon.HIToolbox
 import SystemConfiguration
@@ -56,6 +57,23 @@ struct Quicklink: Codable, Equatable, Identifiable {
     }
 
     var appURL: URL? { appPath.map { URL(fileURLWithPath: $0) } }
+
+    static let finderPath = "/System/Library/CoreServices/Finder.app"
+
+    /// The app that opens this link by default: Finder for folders, the default browser for URLs.
+    var defaultAppPath: String? {
+        if isFolder { return Self.finderPath }
+        guard let probe = URL(string: "https://example.com") else { return nil }
+        return NSWorkspace.shared.urlForApplication(toOpen: probe)?.standardizedFileURL.path
+    }
+
+    /// The app that will actually open this link: the chosen one, else the default.
+    var resolvedAppPath: String? {
+        appPath.map { URL(fileURLWithPath: $0).standardizedFileURL.path } ?? defaultAppPath
+    }
+
+    /// Whether "open with the default app" (⌘↩) would do something different.
+    var hasAlternateApp: Bool { resolvedAppPath != defaultAppPath }
 
     var appName: String {
         guard let appPath else { return isFolder ? "Finder" : "Default Browser" }
