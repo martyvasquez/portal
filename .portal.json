@@ -7,20 +7,8 @@
   ],
   "snippets" : [
     {
-      "name" : "build",
-      "text" : "scripts/build.sh"
-    },
-    {
-      "name" : "show",
-      "text" : "scripts/show.sh"
-    },
-    {
-      "name" : "swift build",
-      "text" : "swift build"
-    },
-    {
-      "name" : "swift test",
-      "text" : "swift test"
+      "name" : "Update Portal",
+      "text" : "git pull && scripts/build.sh --install"
     }
   ]
 }
