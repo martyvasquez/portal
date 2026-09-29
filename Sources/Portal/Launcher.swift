@@ -284,13 +284,14 @@ final class LauncherModel: ObservableObject {
                 if let folder = FolderContext.current(frontApp: self.context.appID) {
                     self.context.load(folder: folder)
                 }
-                if self.finder != nil || self.context.folder != nil { self.search() }
+                self.context.url = BrowserContext.currentURL(frontApp: self.context.appID)
+                if self.finder != nil || self.context.folder != nil || self.context.url != nil { self.search() }
             }
         }
     }
 
-    /// Rows for snippets: this folder's (.portal.json), this app's, then global.
-    private func makeSnippetItems() -> (folder: [LaunchItem], app: [LaunchItem], global: [LaunchItem]) {
+    /// Rows for snippets: this folder's (.portal.json), this site's, this app's, then global.
+    private func makeSnippetItems() -> (folder: [LaunchItem], site: [LaunchItem], app: [LaunchItem], global: [LaunchItem]) {
         func row(_ id: String, _ name: String, _ text: String, section: String) -> LaunchItem {
             var item = LaunchItem(id: id, name: name.isEmpty ? text : name, subtitle: name.isEmpty ? "" : text,
                                   path: "", kind: .snippet, symbol: "text.insert", keywords: text)
@@ -328,11 +329,16 @@ final class LauncherModel: ObservableObject {
             }
         }
         let all = settings.values.snippets
+        var site: [LaunchItem] = []
+        if let url = context.url {
+            site = all.filter { s in s.sites.contains { SiteMatcher.matches($0, url) } }
+                .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets · \(SiteMatcher.label(url))") }
+        }
         let appName = context.appName ?? "This App"
         let app = all.filter { s in context.appID.map { s.apps.contains($0) } ?? false }
             .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets · \(appName)") }
         let global = all.filter(\.isGlobal).map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets") }
-        return (folder, app, global)
+        return (folder, site, app, global)
     }
 
     /// One row per app, in the order set in Settings → Open With: folder apps, then file apps.
@@ -379,7 +385,7 @@ final class LauncherModel: ObservableObject {
         let links = quicklinkItems
         let finder = makeFinderItems()
         let snippets = makeSnippetItems()
-        let snippetRows = snippets.folder + snippets.app + snippets.global
+        let snippetRows = snippets.folder + snippets.site + snippets.app + snippets.global
         let items = finder + snippetRows + Self.commands + links + apps
         let usage = usage.entries
         DispatchQueue.global(qos: .userInitiated).async {
@@ -559,6 +565,8 @@ final class LauncherModel: ObservableObject {
 struct SnippetContext {
     var appID: String?
     var appName: String?
+    /// The front browser tab's page, when the launcher opened over a browser.
+    var url: URL?
     var folder: URL?
     /// Where `.portal.json` lives (or would be created): the existing file's folder, else the git root.
     var root: URL?

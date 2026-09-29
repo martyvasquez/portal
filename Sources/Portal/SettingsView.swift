@@ -452,12 +452,15 @@ private struct SnippetsPage: View {
     @State private var editing: SnippetDraft?
     @State private var selected: UUID?
 
-    /// Global first, then one group per app, alphabetically.
+    /// Global first, then one group per site, then per app, alphabetically.
     private var groups: [(title: String, app: String?, snippets: [Snippet])] {
         let all = settings.values.snippets
         var result: [(String, String?, [Snippet])] = []
         let global = all.filter(\.isGlobal)
         if !global.isEmpty { result.append(("Everywhere", nil, global)) }
+        for site in Set(all.flatMap(\.sites)).sorted() {
+            result.append((site, nil, all.filter { $0.sites.contains(site) }))
+        }
         let apps = Set(all.flatMap(\.apps)).sorted { Self.appName($0) < Self.appName($1) }
         for app in apps { result.append((Self.appName(app), app, all.filter { $0.apps.contains(app) })) }
         return result
@@ -492,8 +495,10 @@ private struct SnippetsPage: View {
                         HStack(spacing: 6) {
                             if let app = group.app, let icon = IconCache.appIcon(bundleID: app) {
                                 Image(nsImage: icon).resizable().frame(width: 14, height: 14)
+                            } else if group.title == "Everywhere" {
+                                Image(systemName: "square.grid.2x2").foregroundStyle(Theme.accent).imageScale(.small)
                             } else {
-                                Image(systemName: "globe").foregroundStyle(Theme.accent).imageScale(.small)
+                                Image(systemName: "globe").foregroundStyle(.teal).imageScale(.small)
                             }
                             Text(group.title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                         }
@@ -526,7 +531,7 @@ private struct SnippetsPage: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "folder").foregroundStyle(.blue)
-                Text("Folder snippets live in **\(PortalFile.name)** in each repo, so they travel with git. In the launcher, **Build Commands** creates one from the repo's scripts; then edit it like any file.")
+                Text("Site snippets show when Chrome, Safari, Arc, Brave, or Edge is on a matching page. Folder snippets live in **\(PortalFile.name)** in each repo, so they travel with git; in the launcher, **Build Commands** creates one from the repo's scripts.")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -561,6 +566,24 @@ private struct SnippetDraft: Identifiable {
     var id: UUID { snippet.id }
 }
 
+private enum SnippetScope: Hashable { case everywhere, apps, sites }
+
+private struct Chip: View {
+    let label: String
+    let icon: NSImage?
+    let remove: () -> Void
+    var body: some View {
+        HStack(spacing: 5) {
+            if let icon { Image(nsImage: icon).resizable().frame(width: 16, height: 16) }
+            Text(label)
+            Button(action: remove) { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 private struct SnippetCard: View {
     let snippet: Snippet
     let isSelected: Bool
@@ -576,6 +599,7 @@ private struct SnippetCard: View {
             }
             Spacer(minLength: 12)
             if snippet.apps.count > 1 { Pill(text: "\(snippet.apps.count) apps") }
+            if snippet.sites.count > 1 { Pill(text: "\(snippet.sites.count) sites") }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -592,6 +616,7 @@ private struct SnippetEditor: View {
 
     init(draft: SnippetDraft, settings: SettingsStore, dismiss: @escaping () -> Void) {
         _snippet = State(initialValue: draft.snippet)
+        _scope = State(initialValue: !draft.snippet.sites.isEmpty ? .sites : !draft.snippet.apps.isEmpty ? .apps : .everywhere)
         isNew = draft.isNew
         self.settings = settings
         self.dismiss = dismiss
@@ -614,30 +639,40 @@ private struct SnippetEditor: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Picker("Show in", selection: everywhere) {
-                    Text("Every app").tag(true)
-                    Text("Only these apps").tag(false)
+                Picker("Show in", selection: $scope) {
+                    Text("Every App").tag(SnippetScope.everywhere)
+                    Text("Only These Apps").tag(SnippetScope.apps)
+                    Text("Only These Sites").tag(SnippetScope.sites)
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                if !snippet.apps.isEmpty || !everywhere.wrappedValue {
-                    HStack(spacing: 6) {
+                switch scope {
+                case .everywhere:
+                    EmptyView()
+                case .apps:
+                    FlowLayout(spacing: 6) {
                         ForEach(snippet.apps, id: \.self) { id in
-                            HStack(spacing: 5) {
-                                if let icon = IconCache.appIcon(bundleID: id) {
-                                    Image(nsImage: icon).resizable().frame(width: 16, height: 16)
-                                }
-                                Text(SnippetsPage.appName(id))
-                                Button { snippet.apps.removeAll { $0 == id } } label: {
-                                    Image(systemName: "xmark").font(.caption2.weight(.bold))
-                                }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                            Chip(label: SnippetsPage.appName(id), icon: IconCache.appIcon(bundleID: id)) {
+                                snippet.apps.removeAll { $0 == id }
                             }
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                         }
                         Button("Add App…", action: addApp)
                     }
+                case .sites:
+                    FlowLayout(spacing: 6) {
+                        ForEach(snippet.sites, id: \.self) { site in
+                            Chip(label: site, icon: nil) { snippet.sites.removeAll { $0 == site } }
+                        }
+                        TextField("github.com", text: $newSite)
+                            .textFieldStyle(.plain)
+                            .font(.callout)
+                            .frame(width: 150)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                            .onSubmit(addSite)
+                    }
+                    Text("Press Return to add. `github.com` includes its subdomains; `*.atlassian.net` matches any; `github.com/martyvasquez` limits to that path.")
+                        .font(.caption).foregroundStyle(.tertiary)
                 }
             }
 
@@ -654,7 +689,9 @@ private struct SnippetEditor: View {
                 Button(isNew ? "Add Snippet" : "Save", action: save)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(snippet.text.isEmpty)
+                    .disabled(snippet.text.isEmpty
+                              || (scope == .apps && snippet.apps.isEmpty)
+                              || (scope == .sites && snippet.sites.isEmpty && newSite.trimmingCharacters(in: .whitespaces).isEmpty))
             }
         }
         .padding(22)
@@ -662,14 +699,16 @@ private struct SnippetEditor: View {
         .tint(Theme.accent)
     }
 
-    @State private var onlyTheseApps = false
+    @State private var scope: SnippetScope = .everywhere
+    @State private var newSite = ""
 
-    private var everywhere: Binding<Bool> {
-        Binding(get: { snippet.apps.isEmpty && !onlyTheseApps },
-                set: { value in
-                    onlyTheseApps = !value
-                    if value { snippet.apps = [] } else if snippet.apps.isEmpty { addApp() }
-                })
+    private func addSite() {
+        var site = newSite.trimmingCharacters(in: .whitespaces).lowercased()
+        if let scheme = site.range(of: "://") { site = String(site[scheme.upperBound...]) }
+        while site.hasSuffix("/") { site.removeLast() }
+        newSite = ""
+        guard !site.isEmpty, !snippet.sites.contains(site) else { return }
+        snippet.sites.append(site)
     }
 
     private func addApp() {
@@ -685,6 +724,10 @@ private struct SnippetEditor: View {
     }
 
     private func save() {
+        if !newSite.isEmpty { addSite() }
+        // One scope at a time: keep only the list for the chosen one.
+        if scope != .apps { snippet.apps = [] }
+        if scope != .sites { snippet.sites = [] }
         if let i = settings.values.snippets.firstIndex(where: { $0.id == snippet.id }) {
             settings.values.snippets[i] = snippet
         } else {

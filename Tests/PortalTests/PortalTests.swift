@@ -271,3 +271,38 @@ import CryptoKit
         #expect(try String(contentsOf: url, encoding: .utf8) == "{ not json")
     }
 }
+
+@Suite struct SiteSnippetTests {
+    private func url(_ s: String) -> URL { URL(string: s)! }
+
+    @Test func hostIncludesSubdomainsAndWww() {
+        #expect(SiteMatcher.matches("github.com", url("https://github.com/martyvasquez/portal")))
+        #expect(SiteMatcher.matches("github.com", url("https://gist.github.com/x")))
+        #expect(SiteMatcher.matches("www.github.com", url("https://github.com/")))
+        #expect(!SiteMatcher.matches("github.com", url("https://notgithub.com/")))
+        #expect(!SiteMatcher.matches("github.com", url("https://github.company.com/")))
+    }
+
+    @Test func wildcardAndScheme() {
+        #expect(SiteMatcher.matches("*.atlassian.net", url("https://bytelaunch.atlassian.net/jira/")))
+        #expect(SiteMatcher.matches("https://docs.google.com/", url("https://docs.google.com/document/d/1")))
+    }
+
+    @Test func pathPrefixIsWholeSegments() {
+        #expect(SiteMatcher.matches("github.com/martyvasquez", url("https://github.com/martyvasquez/portal")))
+        #expect(SiteMatcher.matches("github.com/martyvasquez", url("https://github.com/MartyVasquez")))
+        #expect(!SiteMatcher.matches("github.com/martyvasquez", url("https://github.com/martyvasquezz")))
+        #expect(!SiteMatcher.matches("github.com/martyvasquez", url("https://github.com/anthropics")))
+    }
+
+    @Test func labelDropsWww() {
+        #expect(SiteMatcher.label(url("https://www.google.com/search?q=x")) == "google.com")
+    }
+
+    @Test func oldSnippetsWithoutSitesStillLoad() throws {
+        let json = #"{"snippets":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"Email","text":"a@b.co","apps":[]}]}"#
+        let s = try JSONDecoder().decode(SharedSettings.self, from: Data(json.utf8))
+        #expect(s.snippets.count == 1)
+        #expect(s.snippets[0].sites.isEmpty && s.snippets[0].isGlobal)
+    }
+}

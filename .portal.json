@@ -1,0 +1,26 @@
+{
+  "seeded" : [
+    "scripts/build.sh",
+    "scripts/show.sh",
+    "swift build",
+    "swift test"
+  ],
+  "snippets" : [
+    {
+      "name" : "build",
+      "text" : "scripts/build.sh"
+    },
+    {
+      "name" : "show",
+      "text" : "scripts/show.sh"
+    },
+    {
+      "name" : "swift build",
+      "text" : "swift build"
+    },
+    {
+      "name" : "swift test",
+      "text" : "swift test"
+    }
+  ]
+}

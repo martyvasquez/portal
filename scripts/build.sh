@@ -42,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>Portal asks Finder, Ghostty, and Terminal which folder you're in, to open it with your apps and show that folder's snippets.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Portal asks Finder, Ghostty, and Terminal which folder you're in, and your browser which page you're on, to show matching snippets and open things with your apps.</string>
     <key>NSHumanReadableCopyright</key><string>Personal build</string>
 </dict>
 </plist>

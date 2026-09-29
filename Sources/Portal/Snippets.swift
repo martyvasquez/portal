@@ -1,15 +1,88 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// A global or per-app snippet, stored in settings (synced via iCloud).
+/// A global, per-app, or per-site snippet, stored in settings (synced via iCloud).
 struct Snippet: Codable, Equatable, Identifiable {
     var id = UUID()
     var name: String
     var text: String
-    var apps: [String] = []     // bundle IDs; empty = every app
+    var apps: [String] = []     // bundle IDs
+    var sites: [String] = []    // site patterns like "github.com" or "*.atlassian.net/wiki"
+                                // (neither set = every app)
 
-    var isGlobal: Bool { apps.isEmpty }
+    var isGlobal: Bool { apps.isEmpty && sites.isEmpty }
     var title: String { name.isEmpty ? text : name }
+
+    init(name: String, text: String, apps: [String] = [], sites: [String] = []) {
+        self.name = name
+        self.text = text
+        self.apps = apps
+        self.sites = sites
+    }
+
+    // Snippets saved before `sites` existed must still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        text = try c.decode(String.self, forKey: .text)
+        apps = try c.decodeIfPresent([String].self, forKey: .apps) ?? []
+        sites = try c.decodeIfPresent([String].self, forKey: .sites) ?? []
+    }
+}
+
+// MARK: - Which page is the front browser on?
+
+@MainActor
+enum BrowserContext {
+    /// Browsers that report their current tab to AppleScript. Chromium-based ones share
+    /// Chrome's dictionary; Safari names the tab differently.
+    private static let chromium: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.canary", "org.chromium.Chromium",
+        "company.thebrowser.Browser", "com.brave.Browser", "com.microsoft.edgemac", "com.vivaldi.Vivaldi",
+    ]
+
+    static func isBrowser(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return chromium.contains(bundleID) || bundleID == "com.apple.Safari"
+    }
+
+    static func currentURL(frontApp bundleID: String?) -> URL? {
+        guard let bundleID, isBrowser(bundleID) else { return nil }
+        let tab = bundleID == "com.apple.Safari" ? "current tab" : "active tab"
+        var error: NSDictionary?
+        let script = "tell application id \"\(bundleID)\" to get URL of \(tab) of front window"
+        let result = NSAppleScript(source: script)?.executeAndReturnError(&error).stringValue
+        if let error { NSLog("Portal: couldn't read the browser tab: \(error)") }
+        return result.flatMap(URL.init(string:))
+    }
+}
+
+/// Matches a URL against a site pattern:
+/// `github.com` (and its subdomains), `*.atlassian.net`, or a path prefix like `github.com/martyvasquez`.
+enum SiteMatcher {
+    static func matches(_ pattern: String, _ url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        var p = pattern.lowercased().trimmingCharacters(in: .whitespaces)
+        if let scheme = p.range(of: "://") { p = String(p[scheme.upperBound...]) }
+        while p.hasSuffix("/") { p.removeLast() }
+        let slash = p.firstIndex(of: "/")
+        var patternHost = String(p[..<(slash ?? p.endIndex)])
+        let patternPath = slash.map { String(p[$0...]) } ?? ""
+        if patternHost.hasPrefix("*.") { patternHost.removeFirst(2) }
+        if patternHost.hasPrefix("www.") { patternHost.removeFirst(4) }
+        guard !patternHost.isEmpty,
+              host == patternHost || host.hasSuffix("." + patternHost) else { return false }
+        guard !patternPath.isEmpty else { return true }
+        let path = url.path().lowercased()
+        return path == patternPath || path.hasPrefix(patternPath + "/")
+    }
+
+    /// Short label for a URL's site: the host without "www.".
+    static func label(_ url: URL) -> String {
+        let host = url.host() ?? url.absoluteString
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
 }
 
 // MARK: - Which folder is the front app in?
