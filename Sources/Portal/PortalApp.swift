@@ -222,17 +222,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Menus
 
-    /// The app icon's stacked bars as a monochrome menu bar template. Dimmed while recording is paused.
+    /// The app icon's pyramid as a monochrome menu bar template. Dimmed while recording is paused.
     static func menuBarIcon(paused: Bool) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
-            NSColor.black.withAlphaComponent(paused ? 0.35 : 1).setFill()
-            let bars: [(width: CGFloat, y: CGFloat, height: CGFloat)] = [
-                (4, 3.5, 1.6), (8, 6.5, 2.2), (12, 10, 2.6), (16, 13.8, 3),
-            ]
-            for bar in bars {
-                let rect = NSRect(x: (18 - bar.width) / 2, y: bar.y, width: bar.width, height: bar.height)
-                NSBezierPath(roundedRect: rect, xRadius: bar.height / 2, yRadius: bar.height / 2).fill()
-            }
+            let color = NSColor.black.withAlphaComponent(paused ? 0.35 : 1)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 9, y: 3.5))
+            path.line(to: NSPoint(x: 16, y: 14.5))
+            path.line(to: NSPoint(x: 2, y: 14.5))
+            path.close()
+            path.lineJoinStyle = .round
+            path.lineWidth = 1.6   // stroking with round joins softens the corners
+            color.setFill()
+            color.setStroke()
+            path.fill()
+            path.stroke()
             return true
         }
         image.isTemplate = true

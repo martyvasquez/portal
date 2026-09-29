@@ -172,6 +172,11 @@ scripts/show.sh page:snippets       # open Settings on a page: general | quickli
 swift scripts/make-icon.swift .     # rebuild Resources/AppIcon.icns from Resources/icon-source.png
 ```
 
+To change the app icon, replace `Resources/icon-source.png` (any size, on a transparent or
+black background) and run the icon script, then `scripts/build.sh --install`. The script
+trims the background (ignoring stray specks), fits the art to Apple's icon grid, and fills
+the whole icon shape so macOS 26 doesn't put it on a gray plate.
+
 | File | What's in it |
 |---|---|
 | `PortalApp.swift` | App delegate, hotkeys, menu bar, Settings window |
