@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CryptoKit
+import AppKit
 @testable import Portal
 
 @Suite struct FuzzyTests {
@@ -26,6 +27,14 @@ import CryptoKit
         let b = LaunchItem(id: "/y/api", name: "api", path: "/y/api", kind: .app)
         let usage = ["/y/api": UsageEntry(count: 5, last: Date())]
         #expect(Ranker.rank(query: Array("api".utf8), items: [a, b], usage: usage, limit: 5).first?.path == "/y/api")
+    }
+
+    @Test func nameMatchBeatsFrequentKeywordMatch() {
+        let polish = LaunchItem(id: "transform:polish", name: "Polish", subtitle: "Polish and refine {selection}",
+                                path: "", kind: .transform, keywords: "transform transformer ai")
+        let custom = LaunchItem(id: "transform:custom", name: "Transform with Prompt…", path: "", kind: .transform)
+        let usage = ["transform:polish": UsageEntry(count: 200, last: Date())]
+        #expect(Ranker.rank(query: Array("trans".utf8), items: [polish, custom], usage: usage, limit: 5).first?.id == "transform:custom")
     }
 }
 
@@ -358,6 +367,21 @@ import CryptoKit
     @Test func transformerToleratesMissingFields() throws {
         let t = try JSONDecoder().decode(Transformer.self, from: Data(#"{"name": "X", "prompt": "Do {selection}", "action": "teleport"}"#.utf8))
         #expect(t.name == "X" && t.action == .preview && t.hotKey == nil && t.model == nil)
+    }
+
+    @MainActor @Test func editorLineCopyIsNotASelection() {
+        #expect(SelectionReader.isWholeLine("let x = 1\n"))
+        #expect(SelectionReader.isWholeLine("let x = 1\r\n"))
+        #expect(!SelectionReader.isWholeLine("let x = 1"))
+        #expect(!SelectionReader.isWholeLine("one\ntwo\n"))
+        let pb = NSPasteboard.withUniqueName()
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        pb.setString("let x = 1\n", forType: .string)
+        #expect(SelectionReader.isLineCopy(pb, text: "let x = 1\n", app: "com.sublimetext.4"))
+        #expect(!SelectionReader.isLineCopy(pb, text: "let x = 1\n", app: "com.google.Chrome"))
+        pb.setData(Data(#"{"isFromEmptySelection":false}"#.utf8), forType: .init("vscode-editor-data"))
+        #expect(!SelectionReader.isLineCopy(pb, text: "let x = 1\n", app: "com.microsoft.VSCode"))
     }
 
     @Test func requestBodyCarriesTheConversation() throws {

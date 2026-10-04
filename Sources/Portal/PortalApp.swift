@@ -86,6 +86,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 case "launcher": self?.toggleLauncher()
                 case "clipboard": self?.toggleClipboard()
                 case "new": self?.run(command: "new")
+                case let t? where t.hasPrefix("transform:"):
+                    // Previews the named transformer on the clipboard's text ("transform:Polish"), or copies its
+                    // result ("transform:Polish:copy"). Never pastes.
+                    guard let self, let text = NSPasteboard.general.string(forType: .string) else { return }
+                    let copy = t.hasSuffix(":copy")
+                    let name = t.dropFirst("transform:".count).dropLast(copy ? ":copy".count : 0)
+                    var transformer = self.settings.values.transformers.first { $0.name == name }
+                    transformer?.action = copy ? .copy : .preview
+                    self.launcher.queue(TransformInput(text: text, source: .clipboard), transformer: transformer)
+                    self.launcherPanel.show()
                 case let t? where t.hasPrefix("page:"):
                     if let page = SettingsPage.allCases.first(where: { "page:\($0)" == t }) { self?.router.page = page }
                     self?.showSettings()

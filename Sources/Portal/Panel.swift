@@ -130,6 +130,7 @@ struct SearchField: NSViewRepresentable {
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.text = $text
         if field.stringValue != text { field.stringValue = text }
+        if field.placeholderString != placeholder { field.placeholderString = placeholder }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }

@@ -88,9 +88,9 @@ like `Polish and refine {selection}`, and what it does with the result:
 
 | When done | What happens |
 |---|---|
-| **Preview** | The result streams into the launcher. `↩` replaces the selection, `⌥↩` copies it, `⌘R` retries. Type a follow-up ("shorter") and press `↩` to revise it. |
-| **Replace** | The result is pasted over the selection as soon as it's ready. |
-| **Copy to Clipboard** | The result goes on the clipboard (and into clipboard history). |
+| **Preview** | The result streams into the launcher. `↩` replaces the selection, `⌘C` copies it, `⌘R` retries. Type a follow-up ("shorter") and press `↩` to revise it. |
+| **Replace** | The result is pasted over the selection as soon as it's ready. There's nothing to type while it works; `⎋` cancels. |
+| **Copy to Clipboard** | The result goes on the clipboard (and into clipboard history), and the launcher shows "Copied to Clipboard" before it closes. |
 
 In the launcher, `⌘↩` previews any transformer and `⌥↩` copies its result, whatever its setting.
 
@@ -103,8 +103,9 @@ In the launcher, `⌘↩` previews any transformer and `⌥↩` copies its resul
 **How Portal reads the selection:** it asks the app through Accessibility, which works in most Mac apps.
 Apps that don't share their selection that way (Chrome, terminals, Electron apps) get their own
 Edit ▸ Copy pressed, and Portal reads the copied text and puts your clipboard back. Portal doesn't record that
-copy in clipboard history. A few editors (VS Code among them) copy the current line when nothing is
-selected, so transformers can show up for that line.
+copy in clipboard history. Code editors (Sublime Text, VS Code, JetBrains) copy the cursor's line when
+nothing is highlighted; Portal recognizes that and doesn't offer transformers, so in those editors a
+single whole line selected with its line break also counts as no highlight.
 
 ### ChatGPT (Settings → ChatGPT)
 

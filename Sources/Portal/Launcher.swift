@@ -164,11 +164,15 @@ enum Ranker {
             let hasSlash = query.contains(UInt8(ascii: "/"))
             for item in items {
                 var base = Fuzzy.score(query, item.lowerName)
+                var nameMatch = true
                 if base == nil, hasSlash || item.kind != .app {
                     base = Fuzzy.score(query, item.lowerPath).map { $0 - 8 }
+                    nameMatch = false
                 }
                 guard let base else { continue }
-                var total = Double(base) + (usage[item.id]?.boost(now: now) ?? 0)
+                // Frequent use shouldn't lift a keyword match over something whose name matches.
+                let boost = usage[item.id]?.boost(now: now) ?? 0
+                var total = Double(base) + (nameMatch ? boost : boost / 4)
                 if item.kind == .quicklink || item.kind == .transform { total += 12 }   // yours outrank apps
                 if item.kind == .app { total += 3 }
                 scored.append((item, total))
@@ -222,7 +226,9 @@ final class LauncherModel: ObservableObject {
     /// The transformer that's running or showing its result.
     @Published private(set) var run: TransformRun?
     /// What happens to `run`'s result: the transformer's own action unless ⌘↩ or ⌥↩ picked another.
-    private(set) var runAction: TransformAction = .preview
+    @Published private(set) var runAction: TransformAction = .preview
+    /// The result was just copied; the launcher shows a confirmation, then closes.
+    @Published private(set) var copied = false
     /// Set before showing, to open on a clip's transformers or straight into a transformer.
     private var queued: (input: TransformInput, transformer: Transformer?)?
     /// Opened from clipboard history: only transformers, no apps or quicklinks.
@@ -307,6 +313,7 @@ final class LauncherModel: ObservableObject {
         let shown = showCount
         run?.cancel()
         run = nil
+        copied = false
         pending = nil
         promptMode = false
         query = ""
@@ -831,13 +838,22 @@ extension LauncherModel {
         run.start()
     }
 
-    /// Closes the launcher, then pastes over the selection (or into the app, for a clip) or copies.
+    /// Pastes over the selection (or into the app, for a clip) once the launcher closes,
+    /// or copies and shows a confirmation before closing.
     func deliver(_ text: String, _ action: TransformAction) {
-        onDismiss()
-        if action == .copy || !canPaste {
-            SnippetPaster.copy(text)
-        } else {
+        guard action == .copy || !canPaste else {
+            onDismiss()
             SnippetPaster.paste(text)
+            return
+        }
+        SnippetPaster.copy(text)
+        copied = true
+        let shown = showCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.copied, self.showCount == shown else { return }
+                self.onDismiss()
+            }
         }
     }
 
@@ -845,11 +861,19 @@ extension LauncherModel {
     func endRun() {
         run?.cancel()
         run = nil
+        copied = false
         query = ""
         search()
     }
 
     fileprivate func handleRunKey(_ e: NSEvent, run: TransformRun, flags: NSEvent.ModifierFlags) -> Bool {
+        if copied { return true }
+        // Replace and Copy runs have nothing to type into: only ⎋ and ⌘R.
+        guard runAction == .preview else {
+            if Int(e.keyCode) == 53 { endRun() }
+            else if flags == .command, e.charactersIgnoringModifiers?.lowercased() == "r", run.error != nil { run.regenerate() }
+            return true
+        }
         switch Int(e.keyCode) {
         case 36, 76:
             let followUp = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -859,18 +883,26 @@ extension LauncherModel {
                     query = ""
                 }
             } else if run.isDone {
-                deliver(run.output, flags.contains(.option) ? .copy : .replace)
+                deliver(run.output, .replace)
             }
             return true
         case 53:
             endRun()
             return true
         default:
-            if flags == .command, e.charactersIgnoringModifiers?.lowercased() == "r" {
+            guard flags == .command else { return false }
+            switch e.charactersIgnoringModifiers?.lowercased() {
+            case "r":
                 run.regenerate()
                 return true
+            case "c":
+                // Text highlighted in the field or the result copies as usual.
+                if let editor = e.window?.firstResponder as? NSTextView, editor.selectedRange().length > 0 { return false }
+                if run.isDone { deliver(run.output, .copy) }
+                return true
+            default:
+                return false
             }
-            return false
         }
     }
 }

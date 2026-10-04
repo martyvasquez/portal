@@ -48,7 +48,16 @@ struct LauncherView: View {
                     .font(.title3)
                     .foregroundStyle(.secondary)
             }
-            SearchField(text: $model.query, placeholder: placeholder, fontSize: 17)
+            if let run = model.run, model.runAction != .preview || model.copied {
+                // Nothing to type while a result replaces or copies itself.
+                Text(runStatus(run))
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                SearchField(text: $model.query, placeholder: placeholder, fontSize: 17)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -56,9 +65,16 @@ struct LauncherView: View {
 
     private var placeholder: String {
         if model.pending != nil { return "Type your query" }
-        if model.run != nil { return "Ask for changes" }
+        if model.run != nil { return "Ask for changes, like “shorter” or “more casual”" }
         if model.promptMode { return "What should happen to the \(model.transformInput?.source == .clipboard ? "clip" : "selection")?" }
         return model.transformInput != nil ? "Transform the selection, or search" : "Snippets, quicklinks, and apps"
+    }
+
+    private func runStatus(_ run: TransformRun) -> String {
+        if model.copied { return "Copied" }
+        if run.error != nil { return "Didn't finish" }
+        return model.runAction == .copy || model.actionLabel(.replace) == "Copy" ? "Copying when done…"
+            : model.transformInput?.source == .clipboard ? "Pasting when done…" : "Replacing the selection when done…"
     }
 
     private func breadcrumb(_ title: String) -> some View {
@@ -243,34 +259,22 @@ private struct TransformRunView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(run.followUps.enumerated()), id: \.offset) { _, followUp in
-                        Label(followUp, systemImage: "arrow.turn.down.right")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let error = run.error {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    } else if run.output.isEmpty {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("Working on it…").foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text(run.output)
-                            .font(looksLikeCode ? .callout.monospaced() : .body)
-                            .lineSpacing(2)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            if model.copied {
+                VStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(Theme.accent)
+                    Text("Copied to Clipboard")
+                        .font(.title3.weight(.semibold))
+                    Text("\(run.output.count.formatted()) characters")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.opacity)
+            } else {
+                results
             }
-            .defaultScrollAnchor(.bottom)
-            .scrollIndicators(.automatic)
             Divider()
             HStack(spacing: 14) {
                 Text(status)
@@ -282,6 +286,55 @@ private struct TransformRunView: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 34)
+        }
+        .animation(Motion.standard, value: model.copied)
+    }
+
+    private var results: some View {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            SectionTitle(text: run.followUps.isEmpty ? "Result" : "Revised").padding(.bottom, -4)
+                            ForEach(Array(run.followUps.enumerated()), id: \.offset) { _, followUp in
+                                Pill(text: followUp)
+                            }
+                        }
+                        result
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .card()
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        SectionTitle(text: run.input.source == .clipboard ? "Clip" : "Selection")
+                        Text(run.input.text)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(4)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.automatic)
+    }
+
+    @ViewBuilder private var result: some View {
+        if let error = run.error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        } else if run.output.isEmpty {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(run.followUps.isEmpty ? "Working on it…" : "Revising…").foregroundStyle(.secondary)
+            }
+        } else {
+            Text(run.output)
+                .font(looksLikeCode ? .callout.monospaced() : .body)
+                .lineSpacing(2)
+                .textSelection(.enabled)
         }
     }
 
@@ -298,11 +351,12 @@ private struct TransformRunView: View {
     }
 
     private var hints: [(String, String)] {
+        if model.copied { return [] }
         if run.isRunning { return [("⎋", "Cancel")] }
         if run.error != nil { return [("⌘R", "Try Again"), ("⎋", "Back")] }
         if !model.query.trimmingCharacters(in: .whitespaces).isEmpty { return [("↩", "Ask"), ("⎋", "Back")] }
         var hints = [("↩", model.actionLabel(.replace))]
-        if model.actionLabel(.replace) != "Copy" { hints.append(("⌥↩", "Copy")) }
+        if model.actionLabel(.replace) != "Copy" { hints.append(("⌘C", "Copy")) }
         hints.append(("⌘R", "Retry"))
         hints.append(("⎋", "Back"))
         return hints

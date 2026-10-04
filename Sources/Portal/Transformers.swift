@@ -262,8 +262,9 @@ enum SelectionReader {
         func poll() {
             if pb.changeCount != before {
                 let text = pb.string(forType: .string)
+                let lineCopy = isLineCopy(pb, text: text, app: app.bundleIdentifier)
                 saved.restore(pb)
-                completion(text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil)
+                completion(!lineCopy && text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil)
             } else if waited >= 0.5 {
                 completion(nil)   // the app didn't copy anything
             } else {
@@ -272,6 +273,31 @@ enum SelectionReader {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { poll() }
+    }
+
+    /// Code editors whose Copy, with nothing highlighted, copies the line the cursor is on.
+    private static let lineCopyEditors: Set<String> = [
+        "com.sublimetext.4", "com.sublimetext.3", "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders",
+        "com.vscodium", "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf", "com.google.android.studio",
+    ]
+
+    /// True when the copy was the cursor's line rather than a highlight, so it isn't offered as a selection.
+    /// VS Code and its forks say so on the clipboard; other editors copy one whole line ending in a newline.
+    static func isLineCopy(_ pb: NSPasteboard, text: String?, app bundleID: String?) -> Bool {
+        if let data = pb.data(forType: NSPasteboard.PasteboardType("vscode-editor-data")),
+           let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let empty = info["isFromEmptySelection"] as? Bool {
+            return empty
+        }
+        guard let bundleID, lineCopyEditors.contains(bundleID) || bundleID.hasPrefix("com.jetbrains."),
+              let text else { return false }
+        return isWholeLine(text)
+    }
+
+    /// One line plus its newline: what an editor copies with nothing highlighted.
+    static func isWholeLine(_ text: String) -> Bool {
+        guard let last = text.last, last.isNewline else { return false }
+        return !text.dropLast().contains(where: \.isNewline)
     }
 
     private enum CopyItem { case pressed, disabled, missing }
