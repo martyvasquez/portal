@@ -37,12 +37,12 @@ struct Snippet: Codable, Equatable, Identifiable {
 enum BrowserContext {
     /// Browsers that report their current tab to AppleScript. Chromium-based ones share
     /// Chrome's dictionary; Safari names the tab differently.
-    private static let chromium: Set<String> = [
+    nonisolated private static let chromium: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.canary", "org.chromium.Chromium",
         "company.thebrowser.Browser", "com.brave.Browser", "com.microsoft.edgemac", "com.vivaldi.Vivaldi",
     ]
 
-    static func isBrowser(_ bundleID: String?) -> Bool {
+    nonisolated static func isBrowser(_ bundleID: String?) -> Bool {
         guard let bundleID else { return false }
         return chromium.contains(bundleID) || bundleID == "com.apple.Safari"
     }

@@ -65,6 +65,21 @@ struct TransformersPage: View {
                 }
             }
 
+            if settings.values.transformers.contains(where: { !$0.isGlobal }) {
+                HStack(spacing: 8) {
+                    Text("When some match the app or website you're in, show")
+                    Picker("", selection: $settings.values.transformerListing) {
+                        ForEach(TransformerListing.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 28)
+                .padding(.top, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "lightbulb").foregroundStyle(.yellow)
                 Text("Select text in any app, then open the launcher: transformers come first, in this order (drag to reorder). Type **transform** and a prompt for a one-off, or press **⌘T** on a clip in clipboard history.")
@@ -124,6 +139,7 @@ private struct TransformerCard: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 12)
+            if let scope = transformer.scopeLabel { Pill(text: scope) }
             if let modelName { Pill(text: modelName) }
             Pill(text: transformer.action.title)
             if let hotKey = transformer.hotKey { KeyCap(text: hotKey.display) }
@@ -214,6 +230,41 @@ private struct TransformerEditor: View {
                     }
                 }
                 GridRow {
+                    Text("Show in").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 5) {
+                        FlowLayout(spacing: 6) {
+                            if transformer.isGlobal {
+                                Text("Everywhere")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.trailing, 4).padding(.vertical, 3)
+                            }
+                            ForEach(transformer.apps, id: \.self) { id in
+                                Chip(label: SharedSettings.appName(bundleID: id), icon: IconCache.appIcon(bundleID: id)) {
+                                    transformer.apps.removeAll { $0 == id }
+                                }
+                            }
+                            ForEach(transformer.sites, id: \.self) { site in
+                                Chip(label: site, icon: NSImage(systemSymbolName: "globe", accessibilityDescription: nil)) {
+                                    transformer.sites.removeAll { $0 == site }
+                                }
+                            }
+                            Button("Add App…", action: addApp)
+                            TextField("Add website", text: $newSite)
+                                .textFieldStyle(.plain)
+                                .font(.callout)
+                                .frame(width: 130)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                                .onSubmit(addSite)
+                        }
+                        Text(transformer.isGlobal
+                             ? "Shows on any highlighted text. Add apps or websites to show it only there."
+                             : "Shows in any of these apps or on any of these sites. Clips from clipboard history see every transformer.")
+                            .font(.caption).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                GridRow {
                     Text("Hotkey").foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 5) {
                         HotKeyRecorder(combo: $transformer.hotKey, placeholder: "Record Hotkey")
@@ -221,7 +272,8 @@ private struct TransformerEditor: View {
                             Label("Already used by \(clash).", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption).foregroundStyle(.orange)
                         } else {
-                            Text("Runs on the selection from anywhere, no launcher needed.")
+                            Text(transformer.isGlobal ? "Runs on the selection from anywhere, no launcher needed."
+                                 : "Runs on the selection, only where this transformer shows. Others can use the same key elsewhere.")
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
                     }
@@ -290,7 +342,31 @@ private struct TransformerEditor: View {
     }
 
     private var hotKeyClash: String? {
-        transformer.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: transformer.id) }
+        transformer.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: transformer.id, transformer: transformer) }
+    }
+
+    @State private var newSite = ""
+
+    /// "github.com", "*.atlassian.net", or "github.com/martyvasquez" for one path.
+    private func addSite() {
+        var site = newSite.trimmingCharacters(in: .whitespaces).lowercased()
+        if let scheme = site.range(of: "://") { site = String(site[scheme.upperBound...]) }
+        while site.hasSuffix("/") { site.removeLast() }
+        newSite = ""
+        guard !site.isEmpty, !transformer.sites.contains(site) else { return }
+        transformer.sites.append(site)
+    }
+
+    private func addApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let id = Bundle(url: url)?.bundleIdentifier, !transformer.apps.contains(id) { transformer.apps.append(id) }
+        }
     }
 
     private func insert(_ variable: String) {
@@ -301,6 +377,7 @@ private struct TransformerEditor: View {
     }
 
     private func save() {
+        if !newSite.trimmingCharacters(in: .whitespaces).isEmpty { addSite() }
         var saved = transformer
         saved.name = saved.name.trimmingCharacters(in: .whitespaces)
         if saved.name.isEmpty { saved.name = String(LauncherModel.oneLine(saved.prompt).prefix(40)) }
@@ -438,5 +515,16 @@ private struct ContinueWithChatGPTButton: View {
                 .background(colorScheme == .dark ? Color.white : Color.black, in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+extension Transformer {
+    /// "Mail, github.com" for a scoped transformer's card; nil when it shows everywhere.
+    var scopeLabel: String? {
+        let names = apps.map { SharedSettings.appName(bundleID: $0) } + sites
+        guard let first = names.first else { return nil }
+        if names.count == 1 { return first }
+        if names.count == 2 { return "\(first), \(names[1])" }
+        return "\(first) +\(names.count - 1)"
     }
 }

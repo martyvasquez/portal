@@ -96,7 +96,8 @@ In the launcher, `⌘↩` previews any transformer and `⌥↩` copies its resul
 
 - **Prompt variables**: `{selection}`, `{app}` (the app you're in), `{url}` (your browser's page), `{clipboard}`. A prompt without `{selection}` gets the text added at the end.
 - **One-off prompts**: type `transform` and your prompt, like `transform translate to Spanish`, and press `↩`. Or pick **Transform with Prompt…** and type it. What the result does is set in Settings → ChatGPT.
-- **Hotkeys**: give a transformer its own hotkey to run it on the selection without picking it. The launcher opens to show it working, then closes when Replace or Copy is done.
+- **Where it shows**: by default, on any highlighted text. Add apps (Mail) or websites (`github.com`, `*.atlassian.net`, `github.com/martyvasquez`) under **Show in**, and it shows only in any of them. Websites work in Safari and Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi). Matching transformers come first under their own heading ("For mail.google.com"), with the global ones below under "Everywhere"; or set Settings → Transformers to show **Only Matches** (global ones still show when nothing matches). Out-of-scope transformers are hidden from the list and from search; clips from clipboard history see every transformer.
+- **Hotkeys**: give a transformer its own hotkey to run it on the selection without picking it. The launcher opens to show it working, then closes when Replace or Copy is done. A scoped transformer's hotkey only works where it shows and leaves the key alone elsewhere, so transformers in separate places can share one key (where both apply, the scoped one beats a global one).
 - **Clips**: in clipboard history, `⌘T` opens the transformers for the selected clip. Replace pastes the result into the app you were in. Secrets are never sent.
 - **Model**: the newest GPT Luna your account offers, with Low thinking so it's quick. Change it in Settings → ChatGPT, or per transformer.
 

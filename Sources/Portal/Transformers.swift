@@ -17,6 +17,20 @@ enum TransformAction: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// When transformers match the app or site you're in, the launcher shows them first, then the
+/// global ones; or only them. With no matches, the global ones show either way.
+enum TransformerListing: String, Codable, CaseIterable, Identifiable {
+    case matchesFirst, onlyMatches
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .matchesFirst: "Matches First, Then Everywhere"
+        case .onlyMatches: "Only Matches"
+        }
+    }
+}
+
 /// A saved prompt that rewrites the selected text (or a clip) with ChatGPT.
 struct Transformer: Codable, Equatable, Identifiable {
     var id = UUID()
@@ -27,6 +41,41 @@ struct Transformer: Codable, Equatable, Identifiable {
     /// nil = the model and thinking level from Settings → ChatGPT.
     var model: String?
     var effort: String?
+    /// Where it shows: in any of these apps (bundle IDs) or on any of these sites. Neither = everywhere.
+    var apps: [String] = []
+    var sites: [String] = []
+
+    var isGlobal: Bool { apps.isEmpty && sites.isEmpty }
+
+    /// True in one of its apps or on one of its sites; always true for a global transformer.
+    func applies(app: String?, url: URL?) -> Bool {
+        if isGlobal { return true }
+        if let app, apps.contains(app) { return true }
+        if let url, sites.contains(where: { SiteMatcher.matches($0, url) }) { return true }
+        return false
+    }
+
+    /// Whether both could show in the same place, so one hotkey can't serve both.
+    func overlaps(_ other: Transformer) -> Bool {
+        if isGlobal || other.isGlobal { return true }
+        if !Set(apps).isDisjoint(with: other.apps) { return true }
+        // Sites only match in browsers: a browser in one and a site in the other can meet.
+        if apps.contains(where: BrowserContext.isBrowser) && !other.sites.isEmpty { return true }
+        if other.apps.contains(where: BrowserContext.isBrowser) && !sites.isEmpty { return true }
+        return sites.contains { a in other.sites.contains { b in Self.sitesOverlap(a, b) } }
+    }
+
+    /// `github.com` and `gist.github.com/me` overlap; `github.com` and `gitlab.com` don't.
+    static func sitesOverlap(_ a: String, _ b: String) -> Bool {
+        func probe(_ pattern: String) -> URL? {
+            var p = pattern.lowercased()
+            if p.hasPrefix("*.") { p.removeFirst(2) }
+            return URL(string: "https://" + p)
+        }
+        if let u = probe(b), SiteMatcher.matches(a, u) { return true }
+        if let u = probe(a), SiteMatcher.matches(b, u) { return true }
+        return false
+    }
 
     init(name: String, prompt: String, action: TransformAction = .preview) {
         self.name = name
@@ -43,6 +92,8 @@ struct Transformer: Codable, Equatable, Identifiable {
         hotKey = try c.decodeIfPresent(KeyCombo.self, forKey: .hotKey)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        apps = (try? c.decodeIfPresent([String].self, forKey: .apps)) ?? []
+        sites = (try? c.decodeIfPresent([String].self, forKey: .sites)) ?? []
     }
 
     static let starters: [Transformer] = [

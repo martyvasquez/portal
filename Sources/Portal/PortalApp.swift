@@ -74,7 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.updateFinderHotKey() }
+            .sink { [weak self] _ in
+                self?.updateFinderHotKey()
+                self?.updateTransformerHotKeys()
+            }
             .store(in: &cancellables)
 
         // Scriptable entry point, also handy for testing:
@@ -137,27 +140,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             HotKeyCenter.shared.register(id: id, combo: combo) { [weak self] in self?.openFromHotKey(link) }
         }
 
+        updateTransformerHotKeys()
+    }
+
+    /// Transformer hotkeys, held only while one of their transformers could apply in the front app,
+    /// so a scoped key keeps its normal meaning everywhere else. Transformers in separate scopes can
+    /// share a key: it's registered once and runs whichever one applies.
+    private func updateTransformerHotKeys() {
         transformerHotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
         transformerHotKeyIDs = []
-        for (i, transformer) in settings.values.transformers.enumerated() {
-            guard let combo = transformer.hotKey else { continue }
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        var groups: [(combo: KeyCombo, ids: [UUID], live: Bool)] = []
+        for t in settings.values.transformers {
+            guard let combo = t.hotKey else { continue }
+            let live = t.isGlobal || front.map(t.apps.contains) == true || (!t.sites.isEmpty && BrowserContext.isBrowser(front))
+            if let i = groups.firstIndex(where: { $0.combo.keyCode == combo.keyCode && $0.combo.modifiers == combo.modifiers }) {
+                groups[i].ids.append(t.id)
+                groups[i].live = groups[i].live || live
+            } else {
+                groups.append((combo, [t.id], live))
+            }
+        }
+        for (i, group) in groups.enumerated() where group.live {
             let id = UInt32(1000 + i)
             transformerHotKeyIDs.append(id)
-            HotKeyCenter.shared.register(id: id, combo: combo) { [weak self] in self?.transformFromHotKey(transformer.id) }
+            HotKeyCenter.shared.register(id: id, combo: group.combo) { [weak self] in self?.transformFromHotKey(group.ids) }
         }
     }
 
     /// Runs a transformer on the selection without picking it in the launcher. The launcher
     /// opens to show it working (and the result, for Preview); Replace and Copy close it when done.
-    private func transformFromHotKey(_ id: UUID) {
-        guard let transformer = settings.values.transformers.first(where: { $0.id == id }) else { return }
+    /// Of transformers sharing the key, a scoped one that applies here wins over a global one.
+    private func transformFromHotKey(_ ids: [UUID]) {
+        let candidates = ids.compactMap { id in settings.values.transformers.first { $0.id == id } }
+        let front = NSWorkspace.shared.frontmostApplication
+        let url = candidates.contains { !$0.sites.isEmpty } ? BrowserContext.currentURL(frontApp: front?.bundleIdentifier) : nil
+        let applies = candidates.filter { $0.applies(app: front?.bundleIdentifier, url: url) }
+        guard let transformer = applies.first(where: { !$0.isGlobal }) ?? applies.first else { NSSound.beep(); return }
         clipboardPanel.hide()
         launcherPanel.hide()
         guard AIService.shared.isSignedIn else {
             run(command: "chatgpt")
             return
         }
-        SelectionReader.read(from: NSWorkspace.shared.frontmostApplication) { [weak self] text in
+        SelectionReader.read(from: front) { [weak self] text in
             guard let self else { return }
             guard let text else { NSSound.beep(); return }   // nothing selected
             launcher.queue(TransformInput(text: text, source: .selection), transformer: transformer)

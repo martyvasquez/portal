@@ -519,9 +519,7 @@ private struct SnippetsPage: View {
         return result
     }
 
-    static func appName(_ bundleID: String) -> String {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map { SharedSettings.appName($0.path) } ?? bundleID
-    }
+    static func appName(_ bundleID: String) -> String { SharedSettings.appName(bundleID: bundleID) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -621,7 +619,7 @@ private struct SnippetDraft: Identifiable {
 
 private enum SnippetScope: Hashable { case everywhere, apps, sites }
 
-private struct Chip: View {
+struct Chip: View {
     let label: String
     let icon: NSImage?
     let remove: () -> Void
@@ -1450,12 +1448,15 @@ private struct SyncPage: View {
 
 enum HotKeyClash {
     /// Who else uses `combo`: Portal's own hotkeys, another quicklink or transformer, or macOS.
-    static func owner(of combo: KeyCombo, in v: SharedSettings, excluding id: UUID) -> String? {
+    /// Pass `transformer` (the one being edited) so others with this key in separate scopes don't count.
+    static func owner(of combo: KeyCombo, in v: SharedSettings, excluding id: UUID, transformer: Transformer? = nil) -> String? {
         func same(_ other: KeyCombo?) -> Bool { other?.keyCode == combo.keyCode && other?.modifiers == combo.modifiers }
         if same(v.launcherHotKey) { return "the launcher" }
         if same(v.clipboardHotKey) { return "clipboard history" }
         if let other = v.quicklinks.first(where: { $0.id != id && same($0.hotKey) }) { return "“\(other.name)”" }
-        if let other = v.transformers.first(where: { $0.id != id && same($0.hotKey) }) { return "“\(other.name)”" }
+        if let other = v.transformers.first(where: { $0.id != id && same($0.hotKey) && transformer?.overlaps($0) != false }) {
+            return "“\(other.name)”"
+        }
         return SystemHotKeys.conflict(for: combo)
     }
 }

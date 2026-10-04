@@ -134,6 +134,8 @@ struct SharedSettings: Codable, Equatable {
     var transformers: [Transformer] = Transformer.starters
     /// What "Transform with Prompt" does with its result.
     var customPromptAction: TransformAction = .preview
+    /// How the launcher lists transformers when some match the app or site you're in.
+    var transformerListing: TransformerListing = .matchesFirst
     /// nil = the newest Luna the account offers, at Low.
     var aiModel: String?
     var aiEffort: String?
@@ -149,6 +151,11 @@ struct SharedSettings: Codable, Equatable {
     static func appName(_ path: String) -> String {
         let n = FileManager.default.displayName(atPath: path)
         return n.hasSuffix(".app") ? String(n.dropLast(4)) : n
+    }
+
+    /// "Mail" for com.apple.mail; the bundle ID itself when the app isn't installed on this Mac.
+    static func appName(bundleID: String) -> String {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map { appName($0.path) } ?? bundleID
     }
 
     // Tolerate missing keys so older settings files keep working as fields are added.
@@ -185,6 +192,7 @@ struct SharedSettings: Codable, Equatable {
         ignoredBundleIDs = v(.ignoredBundleIDs, d.ignoredBundleIDs)
         transformers = v(.transformers, d.transformers)
         customPromptAction = v(.customPromptAction, d.customPromptAction)
+        transformerListing = v(.transformerListing, d.transformerListing)
         aiModel = v(.aiModel, d.aiModel)
         aiEffort = v(.aiEffort, d.aiEffort)
     }

@@ -378,21 +378,39 @@ final class LauncherModel: ObservableObject {
             item.section = section
             return [item]
         }
-        var items = settings.values.transformers.map { t in
-            var item = LaunchItem(id: "transform:\(t.id)", name: t.name, subtitle: Self.oneLine(t.prompt),
-                                  path: "", kind: .transform, symbol: "wand.and.sparkles",
-                                  keywords: "transform transformer ai")
-            item.transformerID = t.id
-            item.hotKey = t.hotKey?.display
-            item.badge = actionLabel(t.action)
-            item.section = section
-            return item
+        // Scopes apply to selections; a clip can be headed anywhere, so it gets every transformer.
+        var groups: [(section: String, transformers: [Transformer])]
+        if input.source == .clipboard {
+            groups = [(section, settings.values.transformers)]
+        } else {
+            let all = settings.values.transformers
+            let matches = all.filter { !$0.isGlobal && $0.applies(app: context.appID, url: context.url) }
+            let global = all.filter(\.isGlobal)
+            if matches.isEmpty {
+                groups = [(section, global)]
+            } else if settings.values.transformerListing == .onlyMatches {
+                groups = [(matchSection(matches), matches)]
+            } else {
+                groups = [(matchSection(matches), matches), ("Everywhere", global)]
+            }
+        }
+        var items = groups.flatMap { group in
+            group.transformers.map { t in
+                var item = LaunchItem(id: "transform:\(t.id)", name: t.name, subtitle: Self.promptSummary(t.prompt),
+                                      path: "", kind: .transform, symbol: "wand.and.sparkles",
+                                      keywords: "transform transformer ai")
+                item.transformerID = t.id
+                item.hotKey = t.hotKey?.display
+                item.badge = actionLabel(t.action)
+                item.section = group.section
+                return item
+            }
         }
         var custom = LaunchItem(id: "transform:custom", name: "Transform with Prompt…",
                                 subtitle: "Type what to do with the \(input.source == .clipboard ? "clip" : "selection")",
                                 path: "", kind: .transform, symbol: "text.bubble",
                                 keywords: "transformer ai prompt ask chatgpt custom")
-        custom.section = section
+        custom.section = groups.last?.section ?? section
         items.append(custom)
         return items
     }
@@ -410,6 +428,32 @@ final class LauncherModel: ObservableObject {
         item.section = input.source == .clipboard ? "Transform Clip" : "Transform Selection"
         item.badge = actionLabel(settings.values.customPromptAction)
         return item
+    }
+
+    /// "For mail.google.com" or "For Mail": where the matching transformers apply.
+    private func matchSection(_ matches: [Transformer]) -> String {
+        if let url = context.url, matches.contains(where: { t in t.sites.contains { SiteMatcher.matches($0, url) } }) {
+            return "For \(SiteMatcher.label(url))"
+        }
+        return "For \(context.appName ?? "This App")"
+    }
+
+    /// A prompt as a row's subtitle: one line, without the `{selection}` placeholder every prompt has.
+    static func promptSummary(_ prompt: String) -> String {
+        let lines = prompt.replacingOccurrences(of: "{selection}", with: " ")
+            .split(whereSeparator: \.isNewline)
+            .map { line -> String in
+                var l = line.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+                l = l.replacingOccurrences(of: " .", with: ".").replacingOccurrences(of: " :", with: ":")
+                return l
+            }
+            .filter { !$0.isEmpty }
+        // Lines become sentences: "Polish and refine. Fix grammar…", not "Polish and refine Fix grammar…".
+        var text = lines.enumerated().map { i, line in
+            i < lines.count - 1 && !".:!?;,".contains(line.last!) ? line + "." : line
+        }.joined(separator: " ")
+        while let last = text.last, last == ":" || last == " " { text.removeLast() }
+        return text
     }
 
     static func oneLine(_ text: String) -> String {

@@ -369,6 +369,49 @@ import AppKit
         #expect(t.name == "X" && t.action == .preview && t.hotKey == nil && t.model == nil)
     }
 
+    @Test func scopedTransformerShowsOnlyInItsAppsOrSites() {
+        var t = Transformer(name: "Reply", prompt: "x")
+        #expect(t.applies(app: "com.apple.finder", url: nil))
+        t.apps = ["com.apple.mail"]
+        t.sites = ["github.com"]
+        #expect(t.applies(app: "com.apple.mail", url: nil))
+        #expect(t.applies(app: "com.google.Chrome", url: URL(string: "https://gist.github.com/x")))
+        #expect(!t.applies(app: "com.google.Chrome", url: URL(string: "https://gitlab.com")))
+        #expect(!t.applies(app: "com.sublimetext.4", url: nil))
+    }
+
+    @Test func scopesThatCanMeetOverlap() {
+        let global = Transformer(name: "A", prompt: "x")
+        var mail = Transformer(name: "B", prompt: "x"); mail.apps = ["com.apple.mail"]
+        var sublime = Transformer(name: "C", prompt: "x"); sublime.apps = ["com.sublimetext.4"]
+        var github = Transformer(name: "D", prompt: "x"); github.sites = ["github.com"]
+        var gist = Transformer(name: "E", prompt: "x"); gist.sites = ["gist.github.com/me"]
+        var chrome = Transformer(name: "F", prompt: "x"); chrome.apps = ["com.google.Chrome"]
+        #expect(global.overlaps(mail))
+        #expect(!mail.overlaps(sublime))
+        #expect(!mail.overlaps(github))
+        #expect(github.overlaps(gist))
+        #expect(chrome.overlaps(github))
+        var gitlab = Transformer(name: "G", prompt: "x"); gitlab.sites = ["gitlab.com"]
+        #expect(!github.overlaps(gitlab))
+    }
+
+    @MainActor @Test func rowSubtitleDropsTheSelectionPlaceholder() {
+        #expect(LauncherModel.promptSummary("Polish and refine {selection}\n\nFix grammar.") == "Polish and refine. Fix grammar.")
+        #expect(LauncherModel.promptSummary("Convert this into clean Markdown:\n\n{selection}") == "Convert this into clean Markdown")
+        #expect(LauncherModel.promptSummary("Make it less formal: {selection}") == "Make it less formal")
+        #expect(LauncherModel.promptSummary("Summarize {selection} in one line") == "Summarize in one line")
+    }
+
+    @Test func transformerScopeRoundTrips() throws {
+        var t = Transformer(name: "A", prompt: "x")
+        t.apps = ["com.apple.mail"]; t.sites = ["github.com"]
+        let back = try JSONDecoder().decode(Transformer.self, from: JSONEncoder().encode(t))
+        #expect(back.apps == ["com.apple.mail"] && back.sites == ["github.com"])
+        let old = try JSONDecoder().decode(Transformer.self, from: Data(#"{"name":"A","prompt":"x"}"#.utf8))
+        #expect(old.isGlobal)
+    }
+
     @MainActor @Test func editorLineCopyIsNotASelection() {
         #expect(SelectionReader.isWholeLine("let x = 1\n"))
         #expect(SelectionReader.isWholeLine("let x = 1\r\n"))
