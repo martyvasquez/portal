@@ -16,6 +16,8 @@ final class ClipboardModel: ObservableObject {
     let store: ClipStore
     let settings: SettingsStore
     var onDismiss: () -> Void = {}
+    /// Opens the launcher on the clip's text, to pick a transformer.
+    var onTransform: (String) -> Void = { _ in }
     private var cancellables = Set<AnyCancellable>()
 
     init(store: ClipStore, settings: SettingsStore) {
@@ -114,6 +116,14 @@ final class ClipboardModel: ObservableObject {
         if flags == .command {
             switch chars {
             case "p": if let clip = selected { store.togglePin(clip) }; return true
+            case "t":
+                if let clip = selected, let text = clip.transformableText {
+                    onDismiss()
+                    DispatchQueue.main.async { self.onTransform(text) }
+                } else {
+                    NSSound.beep()
+                }
+                return true
             case "r":
                 if let clip = selected, clip.isSecret {
                     if revealed.contains(clip.id) { revealed.remove(clip.id) } else { revealed.insert(clip.id) }
@@ -267,6 +277,7 @@ struct ClipboardView: View {
             KeyHint(keys: "⌘P", label: model.selected?.pinned == true ? "Unpin" : "Pin")
             if model.selected?.isSecret == true { KeyHint(keys: "⌘R", label: "Reveal") }
             if model.selected?.payload.originalText != nil { KeyHint(keys: "⇧↩", label: "Original") }
+            if model.selected?.transformableText != nil { KeyHint(keys: "⌘T", label: "Transform") }
             KeyHint(keys: "⌘⌫", label: "Delete")
             KeyHint(keys: "⇧⌘↑↓", label: "Filter")
         }
@@ -401,5 +412,14 @@ private struct ClipPreview: View {
             Text(value).lineLimit(2)
         }
         .font(.caption)
+    }
+}
+
+extension Clip {
+    /// Text a transformer can work on. Never secrets: those don't leave the Mac.
+    var transformableText: String? {
+        guard !isSecret, payload.kind == .text || payload.kind == .url,
+              let text = payload.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
     }
 }

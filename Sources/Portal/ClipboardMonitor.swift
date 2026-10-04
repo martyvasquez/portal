@@ -17,6 +17,12 @@ final class ClipboardMonitor {
     private var lastChange = NSPasteboard.general.changeCount
     private var timer: Timer?
     var paused = false
+    /// Until then, changes are Portal's own (reading a selection with ⌘C) and aren't recorded.
+    private static var ignoreUntil = Date.distantPast
+
+    static func ignoreChanges(for seconds: TimeInterval) {
+        ignoreUntil = Date().addingTimeInterval(seconds)
+    }
 
     init(store: ClipStore, settings: SettingsStore) {
         self.store = store
@@ -33,7 +39,7 @@ final class ClipboardMonitor {
         let pb = NSPasteboard.general
         guard pb.changeCount != lastChange else { return }
         lastChange = pb.changeCount
-        guard !paused else { return }
+        guard !paused, Date() >= Self.ignoreUntil else { return }
         capture(pb)
     }
 

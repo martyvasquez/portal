@@ -2,7 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general = "General", quicklinks = "Quicklinks", snippets = "Snippets", openWith = "Open With", clipboard = "Clipboard", sync = "Sync"
+    case general = "General", quicklinks = "Quicklinks", snippets = "Snippets", transformers = "Transformers"
+    case openWith = "Open With", clipboard = "Clipboard", chatgpt = "ChatGPT", sync = "Sync"
     var id: String { rawValue }
 
     var symbol: String {
@@ -10,7 +11,9 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .quicklinks: "link"
         case .openWith: "arrow.up.forward.app"
         case .snippets: "text.insert"
+        case .transformers: "wand.and.sparkles"
         case .clipboard: "doc.on.clipboard"
+        case .chatgpt: "sparkles"
         case .general: "gearshape"
         case .sync: "icloud"
         }
@@ -21,7 +24,9 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .quicklinks: Theme.accent
         case .openWith: .orange
         case .snippets: .pink
+        case .transformers: .purple
         case .clipboard: .teal
+        case .chatgpt: .indigo
         case .general: .gray
         case .sync: .green
         }
@@ -57,6 +62,8 @@ struct SettingsView: View {
                 case .quicklinks: QuicklinksPage(settings: settings, router: router)
                 case .openWith: OpenWithPage(settings: settings)
                 case .snippets: SnippetsPage(settings: settings)
+                case .transformers: TransformersPage(settings: settings, router: router)
+                case .chatgpt: ChatGPTPage(settings: settings)
                 case .clipboard: ClipboardPage(settings: settings, store: store)
                 case .general: GeneralPage(settings: settings, launcher: launcher)
                 case .sync: SyncPage(settings: settings, store: store, keys: keys)
@@ -79,7 +86,8 @@ struct SettingsView: View {
                 SidebarRow(title: page.rawValue, symbol: page.symbol, tint: page.tint,
                            isSelected: router.page == page,
                            badge: page == .quicklinks ? settings.values.quicklinks.count
-                                : page == .snippets ? settings.values.snippets.count : 0)
+                                : page == .snippets ? settings.values.snippets.count
+                                : page == .transformers ? settings.values.transformers.count : 0)
                     .onTapGesture { router.page = page }
             }
             Spacer()
@@ -103,7 +111,7 @@ struct SettingsView: View {
 }
 
 /// Title block at the top of each page.
-private struct PageHeader<Trailing: View>: View {
+struct PageHeader<Trailing: View>: View {
     let title: String
     let subtitle: String
     @ViewBuilder var trailing: Trailing
@@ -450,14 +458,7 @@ private struct QuicklinkEditor: View {
     }
 
     private var hotKeyClash: String? {
-        guard let combo = link.hotKey else { return nil }
-        let v = settings.values
-        if combo.keyCode == v.launcherHotKey.keyCode && combo.modifiers == v.launcherHotKey.modifiers { return "the launcher" }
-        if combo.keyCode == v.clipboardHotKey.keyCode && combo.modifiers == v.clipboardHotKey.modifiers { return "clipboard history" }
-        if let other = v.quicklinks.first(where: {
-            $0.id != link.id && $0.hotKey?.keyCode == combo.keyCode && $0.hotKey?.modifiers == combo.modifiers
-        }) { return "“\(other.name)”" }
-        return SystemHotKeys.conflict(for: combo)
+        link.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: link.id) }
     }
 
     private func save() {
@@ -992,7 +993,7 @@ private struct TypeChip: View {
 }
 
 /// Wraps its children onto new lines, left to right.
-private struct FlowLayout: Layout {
+struct FlowLayout: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -1442,5 +1443,19 @@ private struct SyncPage: View {
         panel.directoryURL = Paths.iCloudDrive
         panel.prompt = "Use Folder"
         if panel.runModal() == .OK, let url = panel.url { settings.syncFolderPath = Paths.abbreviate(url.path) }
+    }
+}
+
+// MARK: - Hotkey clashes
+
+enum HotKeyClash {
+    /// Who else uses `combo`: Portal's own hotkeys, another quicklink or transformer, or macOS.
+    static func owner(of combo: KeyCombo, in v: SharedSettings, excluding id: UUID) -> String? {
+        func same(_ other: KeyCombo?) -> Bool { other?.keyCode == combo.keyCode && other?.modifiers == combo.modifiers }
+        if same(v.launcherHotKey) { return "the launcher" }
+        if same(v.clipboardHotKey) { return "clipboard history" }
+        if let other = v.quicklinks.first(where: { $0.id != id && same($0.hotKey) }) { return "“\(other.name)”" }
+        if let other = v.transformers.first(where: { $0.id != id && same($0.hotKey) }) { return "“\(other.name)”" }
+        return SystemHotKeys.conflict(for: combo)
     }
 }

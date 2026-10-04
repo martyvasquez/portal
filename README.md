@@ -12,10 +12,11 @@ menu bar app with a proper Settings window, and it syncs between Macs through iC
 
 With nothing typed, the launcher shows, in order:
 
-1. **Finder Selection**: when Finder is in front, rows to open the selection with your Open With apps.
-2. **Snippets** for this folder, this site, and this app, then global snippets.
-3. **Quicklinks**, in the order you arranged them.
-4. **Recent Apps**.
+1. **Transformers**: when text is selected, rows to rewrite it with ChatGPT.
+2. **Finder Selection**: when Finder is in front, rows to open the selection with your Open With apps.
+3. **Snippets** for this folder, this site, and this app, then global snippets.
+4. **Quicklinks**, in the order you arranged them.
+5. **Recent Apps**.
 
 Type to filter everything. Results you open often and recently rank higher.
 
@@ -79,6 +80,39 @@ afterwards; in Finder it copies instead. Snippets have one of four scopes:
 
 **Edit Snippets** opens the file in your first Files app.
 
+### Transformers (Settings → Transformers)
+
+Prompts that rewrite the text you've selected, using ChatGPT. Select text in any app and open the
+launcher: the transformers come first, in the order you set in Settings. Each one has a name, a prompt
+like `Polish and refine {selection}`, and what it does with the result:
+
+| When done | What happens |
+|---|---|
+| **Preview** | The result streams into the launcher. `↩` replaces the selection, `⌥↩` copies it, `⌘R` retries. Type a follow-up ("shorter") and press `↩` to revise it. |
+| **Replace** | The result is pasted over the selection as soon as it's ready. |
+| **Copy to Clipboard** | The result goes on the clipboard (and into clipboard history). |
+
+In the launcher, `⌘↩` previews any transformer and `⌥↩` copies its result, whatever its setting.
+
+- **Prompt variables**: `{selection}`, `{app}` (the app you're in), `{url}` (your browser's page), `{clipboard}`. A prompt without `{selection}` gets the text added at the end.
+- **One-off prompts**: type `transform` and your prompt, like `transform translate to Spanish`, and press `↩`. Or pick **Transform with Prompt…** and type it. What the result does is set in Settings → ChatGPT.
+- **Hotkeys**: give a transformer its own hotkey to run it on the selection without picking it. The launcher opens to show it working, then closes when Replace or Copy is done.
+- **Clips**: in clipboard history, `⌘T` opens the transformers for the selected clip. Replace pastes the result into the app you were in. Secrets are never sent.
+- **Model**: the newest GPT Luna your account offers, with Low thinking so it's quick. Change it in Settings → ChatGPT, or per transformer.
+
+**How Portal reads the selection:** it asks the app through Accessibility, which works in most Mac apps.
+Apps that don't share their selection that way (Chrome, terminals, Electron apps) get their own
+Edit ▸ Copy pressed, and Portal reads the copied text and puts your clipboard back. Portal doesn't record that
+copy in clipboard history. A few editors (VS Code among them) copy the current line when nothing is
+selected, so transformers can show up for that line.
+
+### ChatGPT (Settings → ChatGPT)
+
+Transformers run on your ChatGPT Plus or Pro plan through **Sign in with ChatGPT**, so you don't need an API key.
+Click **Continue with ChatGPT**, approve Portal in the browser, and it's connected. The sign-in is kept in
+this Mac's Keychain, so you sign in once on each Mac. The model choice syncs. Requests are sent with
+`store: false`, so OpenAI doesn't keep them.
+
 ### Open With (Settings → Open With)
 
 With Finder in front, the launcher offers apps for what's selected:
@@ -100,6 +134,7 @@ With Finder in front, the launcher offers apps for what's selected:
 | `⇧↩` | Paste the original of a cleaned-up terminal copy |
 | `⌘P` | Pin (never expires) |
 | `⌘R` | Reveal a masked secret |
+| `⌘T` | Transform the clip with a transformer |
 | `⌘⌫` | Delete (on every Mac) |
 | `↑` `↓` | Move through clips |
 | `⇧⌘↑` `⇧⌘↓` | Move through the sidebar filters |
@@ -112,8 +147,10 @@ The Settings window has these pages:
 - **General**: launcher and clipboard hotkeys, show apps in the launcher, **show Portal in the menu bar**, open at login, and permissions.
 - **Quicklinks**
 - **Snippets**
+- **Transformers**
 - **Open With**
 - **Clipboard**: retention, secrets, terminal cleanup, and apps to ignore.
+- **ChatGPT**: sign in, the default model and thinking level, and what one-off prompts do.
 - **Sync**
 
 While Settings is open, Portal gets a Dock icon and appears in ⌘Tab. If the menu bar icon is hidden, open Settings from the launcher ("settings") or by opening Portal again.
@@ -125,10 +162,10 @@ Turn on Settings → Sync on each Mac and use the same folder:
 
 | What | How |
 |---|---|
-| Quicklinks, snippets, Open With, clipboard settings, hotkeys | `settings.json` in the sync folder. Polled every few seconds; the last save wins |
+| Quicklinks, snippets, transformers, Open With, clipboard settings, hotkeys, model choice | `settings.json` in the sync folder. Polled every few seconds; the last save wins |
 | Clipboard history | One AES-256-GCM encrypted file per clip, per Mac. Needs the same passphrase on each Mac |
 | Folder snippets | `.portal.json`, committed to each repo, so they sync through git |
-| Stays on each Mac | Whether sync is on, open at login, permissions, the passphrase (in the Keychain), and launcher ranking |
+| Stays on each Mac | Whether sync is on, open at login, permissions, the passphrase and ChatGPT sign-in (in the Keychain), and launcher ranking |
 
 **How the clipboard files work:**
 - Each Mac writes only its own files, `Clipboard/<machine-id>/<ms>_<uuid>_<flags>.clip`, so two Macs never write the same file.

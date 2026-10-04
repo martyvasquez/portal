@@ -293,9 +293,7 @@ enum SnippetPaster {
     /// Both writes carry Portal's marker so clipboard history ignores them.
     static func paste(_ text: String) {
         let pb = NSPasteboard.general
-        let saved = (pb.pasteboardItems ?? []).map { item in
-            item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
-        }
+        let saved = PasteboardSnapshot(pb)
         pb.clearContents()
         pb.setString(text, forType: .string)
         pb.setData(Data(), forType: .portalMarker)
@@ -306,16 +304,7 @@ enum SnippetPaster {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             Paster.sendPaste()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                pb.clearContents()
-                let items = saved.map { pairs -> NSPasteboardItem in
-                    let item = NSPasteboardItem()
-                    for (type, data) in pairs { item.setData(data, forType: type) }
-                    item.setData(Data(), forType: .portalMarker)
-                    return item
-                }
-                if !items.isEmpty { pb.writeObjects(items) }
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { saved.restore(pb) }
         }
     }
 

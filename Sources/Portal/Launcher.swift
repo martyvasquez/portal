@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-enum LaunchKind: Sendable { case finder, snippet, folderAction, quicklink, app, command }
+enum LaunchKind: Sendable { case transform, finder, snippet, folderAction, quicklink, app, command }
 
 struct LaunchItem: Identifiable, Hashable, Sendable {
     let id: String          // quicklink UUID, app path, or "cmd:<name>"
@@ -16,6 +16,9 @@ struct LaunchItem: Identifiable, Hashable, Sendable {
     var hotKey: String?
     var openWith: String?
     var snippetText: String?
+    var transformerID: UUID?
+    /// Short label shown at the right of the row, like a transformer's action.
+    var badge: String?
     /// Launcher section this row belongs to; defaults to one per kind.
     var section: String?
 
@@ -166,7 +169,7 @@ enum Ranker {
                 }
                 guard let base else { continue }
                 var total = Double(base) + (usage[item.id]?.boost(now: now) ?? 0)
-                if item.kind == .quicklink { total += 12 }   // your quicklinks outrank apps
+                if item.kind == .quicklink || item.kind == .transform { total += 12 }   // yours outrank apps
                 if item.kind == .app { total += 3 }
                 scored.append((item, total))
             }
@@ -200,7 +203,7 @@ enum LaunchAction { case primary, alternate, copy }
 
 @MainActor
 final class LauncherModel: ObservableObject {
-    @Published var query = "" { didSet { if query != oldValue && pending == nil { search() } } }
+    @Published var query = "" { didSet { if query != oldValue && pending == nil && !promptMode && run == nil { search() } } }
     @Published private(set) var results: [LaunchItem] = []
     @Published var selection = 0
     @Published private(set) var appCount = 0
@@ -212,6 +215,20 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var context = SnippetContext()
     /// One-line result of the last folder action, shown in the footer.
     @Published private(set) var notice: String?
+    /// The selected text (or a clip) that transformers work on.
+    @Published private(set) var transformInput: TransformInput?
+    /// Typing a one-off prompt for "Transform with Prompt".
+    @Published private(set) var promptMode = false
+    /// The transformer that's running or showing its result.
+    @Published private(set) var run: TransformRun?
+    /// What happens to `run`'s result: the transformer's own action unless ⌘↩ or ⌥↩ picked another.
+    private(set) var runAction: TransformAction = .preview
+    /// Set before showing, to open on a clip's transformers or straight into a transformer.
+    private var queued: (input: TransformInput, transformer: Transformer?)?
+    /// Opened from clipboard history: only transformers, no apps or quicklinks.
+    private var transformOnly = false
+    private var showCount = 0
+    let ai = AIService.shared
     /// Launcher row id → (items to open, app to open them with).
     private var finderTargets: [String: (urls: [URL], app: String)] = [:]
 
@@ -248,6 +265,19 @@ final class LauncherModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.search() }
             .store(in: &cancellables)
+        settings.$values
+            .map(\.transformers)
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.search() }
+            .store(in: &cancellables)
+        ai.$isSignedIn
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.search() }
+            .store(in: &cancellables)
         timer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.reindex() }
         }
@@ -267,28 +297,130 @@ final class LauncherModel: ObservableObject {
         }
     }
 
+    /// Opens on `input`'s transformers the next time the launcher shows, or runs `transformer` on it right away.
+    func queue(_ input: TransformInput, transformer: Transformer? = nil) {
+        queued = (input, transformer)
+    }
+
     func prepareForShow() {
+        showCount += 1
+        let shown = showCount
+        run?.cancel()
+        run = nil
         pending = nil
+        promptMode = false
         query = ""
         finder = nil
         notice = nil
         let front = NSWorkspace.shared.frontmostApplication
         context = SnippetContext(appID: front?.bundleIdentifier, appName: front?.localizedName)
+        let queued = self.queued
+        self.queued = nil
+        transformOnly = queued != nil && queued?.transformer == nil
+        // Read the selection now, while the app still has the keyboard: Accessibility when the app
+        // reports it (instant), else its Edit ▸ Copy, whose result is read once the panel is up.
+        transformInput = queued?.input
+        if queued == nil {
+            switch SelectionReader.accessibilitySelection(in: front) {
+            case .text(let text):
+                transformInput = TransformInput(text: text, source: .selection)
+            case .none:
+                break
+            case .unsupported:
+                SelectionReader.copiedText(from: front, keystroke: false) { text in
+                    guard let text, shown == self.showCount, self.transformInput == nil else { return }
+                    self.transformInput = TransformInput(text: text, source: .selection)
+                    if self.run == nil && self.pending == nil && !self.promptMode { self.search() }
+                }
+            }
+        }
         search()
         // Ask Finder/Ghostty/Terminal after the panel is on screen so it opens instantly.
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                if FinderSelection.finderIsFrontmost {
+                if FinderSelection.finderIsFrontmost, queued == nil {
                     self.finder = FinderSelection.current(excludedTypes: self.settings.values.excludedFileTypes)
                 }
                 if let folder = FolderContext.current(frontApp: self.context.appID) {
                     self.context.load(folder: folder)
                 }
                 self.context.url = BrowserContext.currentURL(frontApp: self.context.appID)
+                if let transformer = queued?.transformer {
+                    self.startTransform(transformer)   // after the page URL is known, for {url}
+                    return
+                }
                 if self.finder != nil || self.context.folder != nil || self.context.url != nil { self.search() }
             }
         }
     }
+
+    /// The panel closed: stop any run, so a late reply never pastes into whatever is in front now.
+    func didHide() {
+        run?.cancel()
+    }
+
+    /// Rows for the transformers, when there's selected text or a clip to work on.
+    private func makeTransformItems() -> [LaunchItem] {
+        guard let input = transformInput else { return [] }
+        let section = input.source == .clipboard ? "Transform Clip" : "Transform Selection"
+        guard ai.isSignedIn else {
+            var item = LaunchItem(id: "ai:signin", name: "Sign In with ChatGPT",
+                                  subtitle: "Transformers run on your ChatGPT Plus or Pro plan",
+                                  path: "", kind: .transform, symbol: "sparkles",
+                                  keywords: "transform transformer ai chatgpt")
+            item.section = section
+            return [item]
+        }
+        var items = settings.values.transformers.map { t in
+            var item = LaunchItem(id: "transform:\(t.id)", name: t.name, subtitle: Self.oneLine(t.prompt),
+                                  path: "", kind: .transform, symbol: "wand.and.sparkles",
+                                  keywords: "transform transformer ai")
+            item.transformerID = t.id
+            item.hotKey = t.hotKey?.display
+            item.badge = actionLabel(t.action)
+            item.section = section
+            return item
+        }
+        var custom = LaunchItem(id: "transform:custom", name: "Transform with Prompt…",
+                                subtitle: "Type what to do with the \(input.source == .clipboard ? "clip" : "selection")",
+                                path: "", kind: .transform, symbol: "text.bubble",
+                                keywords: "transformer ai prompt ask chatgpt custom")
+        custom.section = section
+        items.append(custom)
+        return items
+    }
+
+    /// "transform make it shorter" runs "make it shorter" as a one-off prompt.
+    private func inlinePromptItem(_ query: String) -> LaunchItem? {
+        guard let input = transformInput, ai.isSignedIn else { return nil }
+        let prefix = "transform "
+        guard query.lowercased().hasPrefix(prefix) else { return nil }
+        let prompt = query.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+        guard !prompt.isEmpty else { return nil }
+        var item = LaunchItem(id: "transform:inline", name: prompt,
+                              subtitle: "Runs this prompt on the \(input.source == .clipboard ? "clip" : "selection")",
+                              path: "", kind: .transform, symbol: "text.bubble")
+        item.section = input.source == .clipboard ? "Transform Clip" : "Transform Selection"
+        item.badge = actionLabel(settings.values.customPromptAction)
+        return item
+    }
+
+    static func oneLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// What an action is called here: Replace becomes Paste for a clip, and Copy in Finder.
+    func actionLabel(_ action: TransformAction) -> String {
+        switch action {
+        case .preview: "Preview"
+        case .copy: "Copy"
+        case .replace: !canPaste ? "Copy" : transformInput?.source == .clipboard ? "Paste" : "Replace"
+        }
+    }
+
+    /// Pasting into Finder does nothing useful, so there results are copied.
+    private var canPaste: Bool { context.appID != "com.apple.finder" }
 
     /// Rows for snippets: this folder's (.portal.json), this site's, this app's, then global.
     private func makeSnippetItems() -> (folder: [LaunchItem], site: [LaunchItem], app: [LaunchItem], global: [LaunchItem]) {
@@ -386,15 +518,19 @@ final class LauncherModel: ObservableObject {
         let finder = makeFinderItems()
         let snippets = makeSnippetItems()
         let snippetRows = snippets.folder + snippets.site + snippets.app + snippets.global
-        let items = finder + snippetRows + Self.commands + links + apps
+        let transforms = makeTransformItems()
+        let inline = inlinePromptItem(query.trimmingCharacters(in: .whitespaces)).map { [$0] } ?? []
+        let transformOnly = transformOnly
+        let items = transformOnly ? transforms : transforms + finder + snippetRows + Self.commands + links + apps
         let usage = usage.entries
         DispatchQueue.global(qos: .userInitiated).async {
             let ranked: [LaunchItem]
             if q.isEmpty {
-                // Quicklinks in the order you arranged them, then recently used apps.
-                ranked = finder + snippetRows + links + Ranker.rank(query: [], items: items.filter { $0.kind == .app }, usage: usage, limit: 5)
+                // Transformers for the selection, quicklinks in the order you arranged them, then recently used apps.
+                ranked = transformOnly ? transforms
+                    : transforms + finder + snippetRows + links + Ranker.rank(query: [], items: items.filter { $0.kind == .app }, usage: usage, limit: 5)
             } else {
-                ranked = Ranker.rank(query: q, items: items, usage: usage, limit: 60)
+                ranked = inline + Ranker.rank(query: q, items: items, usage: usage, limit: 60)
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -429,12 +565,25 @@ final class LauncherModel: ObservableObject {
 
     func cancelPending() {
         pending = nil
+        promptMode = false
         query = ""
         search()
     }
 
     func handleKey(_ e: NSEvent) -> Bool {
         let flags = e.modifierFlags.intersection([.command, .option, .control, .shift])
+        if let run { return handleRunKey(e, run: run, flags: flags) }
+        if promptMode {
+            switch Int(e.keyCode) {
+            case 36, 76:
+                let prompt = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !prompt.isEmpty { runPrompt(prompt, action: override(for: flags)) }
+                return true
+            case 53: cancelPending(); return true
+            case 51 where query.isEmpty: cancelPending(); return true
+            default: return false
+            }
+        }
         if let link = pending {
             switch Int(e.keyCode) {
             case 36, 76:
@@ -454,8 +603,9 @@ final class LauncherModel: ObservableObject {
         case 36, 76:                              // ↩
             perform(flags.contains(.option) ? .copy : flags.contains(.command) ? .alternate : .primary)
             return true
-        case 48:                                  // ⇥ fills in a {query} quicklink
+        case 48:                                  // ⇥ fills in a {query} quicklink or a prompt
             if let link = quicklink(for: selectedItem), link.needsQuery { beginArgument(link) }
+            if selectedItem?.id == "transform:custom" { beginPrompt() }
             return true
         case 53:                                  // ⎋
             if query.isEmpty { onDismiss() } else { query = "" }
@@ -481,6 +631,21 @@ final class LauncherModel: ObservableObject {
     func perform(_ action: LaunchAction, item: LaunchItem? = nil) {
         guard let item = item ?? selectedItem else { return }
         switch item.kind {
+        case .transform:
+            let chosen: TransformAction? = action == .copy ? .copy : action == .alternate ? .preview : nil
+            switch item.id {
+            case "ai:signin":
+                onCommand("chatgpt")
+                onDismiss()
+            case "transform:custom":
+                beginPrompt()
+            case "transform:inline":
+                runPrompt(item.name, action: chosen)
+            default:
+                guard let t = settings.values.transformers.first(where: { $0.id == item.transformerID }) else { return }
+                usage.record(item.id)
+                startTransform(t, action: chosen)
+            }
         case .snippet:
             guard let text = item.snippetText else { return }
             onDismiss()
@@ -536,8 +701,21 @@ final class LauncherModel: ObservableObject {
 
     func hints(for item: LaunchItem?) -> [(String, String)] {
         if let pending { return [("↩", "Open in \(pending.appName)"), ("⎋", "Back")] }
+        if promptMode { return [("↩", actionLabel(settings.values.customPromptAction)), ("⎋", "Back")] }
         guard let item else { return [("⎋", "Close")] }
         switch item.kind {
+        case .transform:
+            switch item.id {
+            case "ai:signin": return [("↩", "Sign In")]
+            case "transform:custom": return [("↩", "Write Prompt")]
+            default:
+                let own = item.id == "transform:inline" ? settings.values.customPromptAction
+                    : settings.values.transformers.first { $0.id == item.transformerID }?.action ?? .preview
+                var hints = [("↩", actionLabel(own))]
+                if own != .preview { hints.append(("⌘↩", "Preview")) }
+                if own != .copy { hints.append(("⌥↩", "Copy")) }
+                return hints
+            }
         case .snippet:
             return context.appID == "com.apple.finder" ? [("↩", "Copy")] : [("↩", "Paste"), ("⌥↩", "Copy")]
         case .folderAction:
@@ -618,3 +796,82 @@ extension LauncherModel {
         }
     }
 }
+
+// MARK: - Transformers
+
+extension LauncherModel {
+    func beginPrompt() {
+        promptMode = true
+        query = ""
+    }
+
+    /// ⌘↩ previews and ⌥↩ copies, whatever the transformer normally does.
+    fileprivate func override(for flags: NSEvent.ModifierFlags) -> TransformAction? {
+        flags.contains(.option) ? .copy : flags.contains(.command) ? .preview : nil
+    }
+
+    func runPrompt(_ prompt: String, action: TransformAction?) {
+        startTransform(Transformer(name: prompt, prompt: prompt), action: action ?? settings.values.customPromptAction)
+    }
+
+    func startTransform(_ transformer: Transformer, action: TransformAction? = nil) {
+        guard let input = transformInput else { return }
+        let context = TransformPrompt.Context(app: context.appName, url: context.url,
+                                              clipboard: NSPasteboard.general.string(forType: .string))
+        let run = TransformRun(transformer: transformer, input: input, context: context, ai: ai)
+        let action = action ?? transformer.action
+        runAction = action
+        if action != .preview {
+            run.onFirstReply = { [weak self] text in self?.deliver(text, action) }
+        }
+        pending = nil
+        promptMode = false
+        self.run = run
+        query = ""
+        run.start()
+    }
+
+    /// Closes the launcher, then pastes over the selection (or into the app, for a clip) or copies.
+    func deliver(_ text: String, _ action: TransformAction) {
+        onDismiss()
+        if action == .copy || !canPaste {
+            SnippetPaster.copy(text)
+        } else {
+            SnippetPaster.paste(text)
+        }
+    }
+
+    /// Back from a run to the transformers.
+    func endRun() {
+        run?.cancel()
+        run = nil
+        query = ""
+        search()
+    }
+
+    fileprivate func handleRunKey(_ e: NSEvent, run: TransformRun, flags: NSEvent.ModifierFlags) -> Bool {
+        switch Int(e.keyCode) {
+        case 36, 76:
+            let followUp = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !followUp.isEmpty {
+                if run.isDone {
+                    run.refine(followUp)
+                    query = ""
+                }
+            } else if run.isDone {
+                deliver(run.output, flags.contains(.option) ? .copy : .replace)
+            }
+            return true
+        case 53:
+            endRun()
+            return true
+        default:
+            if flags == .command, e.charactersIgnoringModifiers?.lowercased() == "r" {
+                run.regenerate()
+                return true
+            }
+            return false
+        }
+    }
+}
+

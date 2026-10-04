@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         launcherPanel = PanelController(size: NSSize(width: 680, height: 440), rootView: AnyView(LauncherView(model: launcher)))
         launcherPanel.keyHandler = { [unowned self] in launcher.handleKey($0) }
         launcherPanel.onShow = { [unowned self] in launcher.prepareForShow() }
+        launcherPanel.onHide = { [unowned self] in launcher.didHide() }
         launcher.onDismiss = { [unowned self] in launcherPanel.hide() }
         launcher.onCommand = { [unowned self] in run(command: $0) }
 
@@ -47,13 +48,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         clipboardPanel.keyHandler = { [unowned self] in clipModel.handleKey($0) }
         clipboardPanel.onShow = { [unowned self] in clipModel.prepareForShow() }
         clipModel.onDismiss = { [unowned self] in clipboardPanel.hide() }
+        clipModel.onTransform = { [unowned self] text in
+            launcher.queue(TransformInput(text: text, source: .clipboard))
+            launcherPanel.show()
+        }
 
         buildMainMenu()
         buildStatusItem()
 
         settings.$values
             .map { HotKeyConfig(launcher: $0.launcherHotKey, clipboard: $0.clipboardHotKey,
-                                     finder: $0.finderSelectionHotKey, links: $0.quicklinks) }
+                                finder: $0.finderSelectionHotKey, links: $0.quicklinks, transformers: $0.transformers) }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.registerHotKeys() }
@@ -101,10 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private struct HotKeyConfig: Equatable {
-        let launcher: KeyCombo, clipboard: KeyCombo, finder: KeyCombo?, links: [Quicklink]
+        let launcher: KeyCombo, clipboard: KeyCombo, finder: KeyCombo?, links: [Quicklink], transformers: [Transformer]
     }
 
     private var linkHotKeyIDs: [UInt32] = []
+    private var transformerHotKeyIDs: [UInt32] = []
 
     private func registerHotKeys() {
         HotKeyCenter.shared.register(id: 1, combo: settings.values.launcherHotKey) { [weak self] in self?.toggleLauncher() }
@@ -119,6 +125,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let id = UInt32(100 + i)
             linkHotKeyIDs.append(id)
             HotKeyCenter.shared.register(id: id, combo: combo) { [weak self] in self?.openFromHotKey(link) }
+        }
+
+        transformerHotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
+        transformerHotKeyIDs = []
+        for (i, transformer) in settings.values.transformers.enumerated() {
+            guard let combo = transformer.hotKey else { continue }
+            let id = UInt32(1000 + i)
+            transformerHotKeyIDs.append(id)
+            HotKeyCenter.shared.register(id: id, combo: combo) { [weak self] in self?.transformFromHotKey(transformer.id) }
+        }
+    }
+
+    /// Runs a transformer on the selection without picking it in the launcher. The launcher
+    /// opens to show it working (and the result, for Preview); Replace and Copy close it when done.
+    private func transformFromHotKey(_ id: UUID) {
+        guard let transformer = settings.values.transformers.first(where: { $0.id == id }) else { return }
+        clipboardPanel.hide()
+        launcherPanel.hide()
+        guard AIService.shared.isSignedIn else {
+            run(command: "chatgpt")
+            return
+        }
+        SelectionReader.read(from: NSWorkspace.shared.frontmostApplication) { [weak self] text in
+            guard let self else { return }
+            guard let text else { NSSound.beep(); return }   // nothing selected
+            launcher.queue(TransformInput(text: text, source: .selection), transformer: transformer)
+            launcherPanel.show()
         }
     }
 
@@ -170,6 +203,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch command {
         case "clipboard": DispatchQueue.main.async { self.clipboardPanel.show() }
         case "settings": showSettings()
+        case "chatgpt":
+            router.page = .chatgpt
+            showSettings()
+            if !AIService.shared.isSignedIn { AIService.shared.signIn() }
         case "new":
             router.page = .quicklinks
             showSettings()

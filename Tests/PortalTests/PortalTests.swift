@@ -322,3 +322,50 @@ import CryptoKit
         #expect(ghostty.hasAlternateApp)
     }
 }
+
+@Suite struct TransformerTests {
+    let context = TransformPrompt.Context(app: "Mail", url: URL(string: "https://example.com/a"), clipboard: "clip")
+
+    @Test func fillsVariables() {
+        let p = TransformPrompt.render("Polish {selection} for {app} on {url} with {clipboard}", text: "hi there", context: context)
+        #expect(p == "Polish hi there for Mail on https://example.com/a with clip")
+    }
+
+    @Test func appendsTextWhenPromptDoesNotUseIt() {
+        #expect(TransformPrompt.render("Make this shorter.\n", text: "long text", context: context) == "Make this shorter.\n\nlong text")
+    }
+
+    @Test func selectionIsInsertedLiterally() {
+        // Braces in the selected text aren't treated as variables.
+        let p = TransformPrompt.render("Fix: {selection}", text: "use {app} and {url}", context: context)
+        #expect(p == "Fix: use {app} and {url}")
+    }
+
+    @Test func olderSettingsGetStarterTransformers() throws {
+        let v = try JSONDecoder().decode(SharedSettings.self, from: Data(#"{"includeApps": false}"#.utf8))
+        #expect(v.transformers.map(\.name) == Transformer.starters.map(\.name))
+        #expect(v.customPromptAction == .preview)
+        #expect(v.aiModel == nil)
+    }
+
+    @Test func deletedStartersStayDeleted() throws {
+        var v = SharedSettings()
+        v.transformers = []
+        let round = try JSONDecoder().decode(SharedSettings.self, from: JSONEncoder().encode(v))
+        #expect(round.transformers.isEmpty)
+    }
+
+    @Test func transformerToleratesMissingFields() throws {
+        let t = try JSONDecoder().decode(Transformer.self, from: Data(#"{"name": "X", "prompt": "Do {selection}", "action": "teleport"}"#.utf8))
+        #expect(t.name == "X" && t.action == .preview && t.hotKey == nil && t.model == nil)
+    }
+
+    @Test func requestBodyCarriesTheConversation() throws {
+        let body = try ChatGPTClient.body(model: "gpt-5.6-luna", effort: nil, instructions: TransformPrompt.instructions,
+                                          messages: [ChatMessage(role: .user, content: "Polish x")])
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["model"] as? String == "gpt-5.6-luna")
+        #expect(json["reasoning"] == nil)
+        #expect((json["input"] as? [[String: String]])?.first?["content"] == "Polish x")
+    }
+}

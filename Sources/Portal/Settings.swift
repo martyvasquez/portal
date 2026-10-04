@@ -131,6 +131,13 @@ struct SharedSettings: Codable, Equatable {
     var unwrapTerminalLines = true
     var ignoredBundleIDs: [String] = []
 
+    var transformers: [Transformer] = Transformer.starters
+    /// What "Transform with Prompt" does with its result.
+    var customPromptAction: TransformAction = .preview
+    /// nil = the newest Luna the account offers, at Low.
+    var aiModel: String?
+    var aiEffort: String?
+
     init() {}
 
     private enum LegacyKeys: String, CodingKey { case finderSelectionAppPath }
@@ -176,6 +183,10 @@ struct SharedSettings: Codable, Equatable {
         cleanTerminalCopies = v(.cleanTerminalCopies, d.cleanTerminalCopies)
         unwrapTerminalLines = v(.unwrapTerminalLines, d.unwrapTerminalLines)
         ignoredBundleIDs = v(.ignoredBundleIDs, d.ignoredBundleIDs)
+        transformers = v(.transformers, d.transformers)
+        customPromptAction = v(.customPromptAction, d.customPromptAction)
+        aiModel = v(.aiModel, d.aiModel)
+        aiEffort = v(.aiEffort, d.aiEffort)
     }
 }
 
