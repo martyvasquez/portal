@@ -268,6 +268,7 @@ final class LauncherModel: ObservableObject {
         LaunchItem(id: "cmd:clipboard", name: "Clipboard History", path: "", kind: .command, symbol: "doc.on.clipboard", keywords: "paste"),
         LaunchItem(id: "cmd:new", name: "New Quicklink", path: "", kind: .command, symbol: "plus", keywords: "add create"),
         LaunchItem(id: "cmd:settings", name: "Portal Settings", path: "", kind: .command, symbol: "gearshape", keywords: "preferences"),
+        LaunchItem(id: "cmd:update", name: "Check for Updates", path: "", kind: .command, symbol: "arrow.down.circle", keywords: "update upgrade version"),
         LaunchItem(id: "cmd:quit", name: "Quit Portal", path: "", kind: .command, symbol: "power", keywords: "exit"),
     ]
 

@@ -306,10 +306,18 @@ Turn on **Settings → Sync** on each Mac and use the same folder, by default
 
 ## Install
 
-Portal is built from source for now.
+**Download** `Portal.zip` from the [latest release](https://github.com/martyvasquez/portal/releases/latest),
+unzip it, and drag `Portal.app` into Applications. The first time you open it, macOS may say it can't
+verify the app: click **Done**, then **System Settings → Privacy & Security → Open Anyway**.
+
+**Updates are automatic.** Portal checks for a new release at launch, every four hours, and when the Mac
+wakes. It downloads in the background and relaunches on the new version once you haven't used it for a
+minute. **Check for Updates…** is in the menu bar menu, and in the launcher.
+
+### Build from source
 
 **Requirements**
-- **macOS 26** or later on Apple silicon.
+- **macOS 26** or later.
 - **Full Xcode**, not just the Command Line Tools. On the macOS 27 SDK, SwiftUI's `@State` is a macro whose plugin only ships with Xcode.
 - An **Apple Development** signing certificate. A free **Personal Team** is enough; no paid developer account needed. In Xcode → Settings → Accounts, add any Apple ID, select its Personal Team, click **Manage Certificates…**, and add an **Apple Development** certificate. `scripts/build.sh` finds it on its own. Without one the app is signed ad hoc, and macOS forgets Portal's permissions on every rebuild.
 
@@ -322,7 +330,7 @@ scripts/build.sh --install
 
 This builds a release, signs it, copies `Portal.app` to `/Applications`, and launches it.
 
-**To update**, pull and rebuild. In a terminal inside the repo, the launcher even offers this as the **Update Portal** snippet:
+To rebuild from your own checkout, pull and build again. In a terminal inside the repo, the launcher offers this as the **Update Portal** snippet:
 
 ```sh
 git pull && scripts/build.sh --install
@@ -375,6 +383,14 @@ swift scripts/make-icon.swift .  # rebuild Resources/AppIcon.icns from Resources
 
 Set `SIGN_IDENTITY="Apple Development: …"` to choose a certificate when you have more than one.
 
+**Releases.** Every push to `main` that changes the app runs `.github/workflows/release.yml`: tests, a
+universal build signed with the release certificate, a Sparkle-signed `Portal.zip`, and a GitHub
+release with its `appcast.xml`. Installed copies read
+`releases/latest/download/appcast.xml`. Build numbers are UTC timestamps (`202610051558`), locally and in
+CI. Don't change the feed URL, the Sparkle public key, the bundle ID, or the signing certificate: installed
+copies depend on them. The workflow needs three secrets: `SPARKLE_PRIVATE_KEY` (its backup is in the
+login keychain under `com.martyvasquez.portal`), and `SIGNING_CERT_P12` / `SIGNING_CERT_PASSWORD`.
+
 To change the app icon, replace `Resources/icon-source.png` (any size, on a transparent or black
 background), run the icon script, then `scripts/build.sh --install`. The script trims the background,
 fits the art to Apple's icon grid, and fills the whole icon shape so macOS doesn't put it on a gray plate.
@@ -396,6 +412,7 @@ fits the art to Apple's icon grid, and fills the whole icon shape so macOS doesn
 | `Settings.swift`, `SettingsView.swift`, `SettingsAI.swift` | Synced settings and the Settings window |
 | `Theme.swift` | Colors and shared components |
 | `Panel.swift`, `System.swift` | Floating panels, Carbon hotkeys, conflict checks, login item, permissions |
+| `Updater.swift` | Sparkle updates from GitHub Releases: when to check, and installing only when idle |
 
 ## FAQ
 
@@ -403,7 +420,7 @@ fits the art to Apple's icon grid, and fills the whole icon shape so macOS doesn
 context-aware snippets, quicklinks, transformers, and a synced encrypted clipboard, and nothing else,
 with its whole configuration in one readable JSON file.
 
-**Does it work on Intel Macs?** The build script targets `arm64`. Change `--arch` in `scripts/build.sh` if you want to try.
+**Does it work on Intel Macs?** Yes. Releases are universal (Apple silicon and Intel).
 
 **Portal lost its permissions after I rebuilt it.** It was signed ad hoc. Create a free Apple Development
 certificate with your Apple ID's Personal Team (Xcode → Settings → Accounts → Manage Certificates…) and

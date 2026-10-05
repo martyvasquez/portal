@@ -1,0 +1,79 @@
+# Publishes Portal on every push to main that changes the app. Installed copies check
+# this repo's latest release (at launch, every few hours, and on wake) and update themselves.
+# Same setup as baseball-simulator's release-mac.yml, except Portal is signed with the
+# Personal Team certificate instead of ad hoc, so Accessibility survives updates.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "Resources/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/build.sh"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test
+        run: swift test
+
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Apple Development/ {print $2; exit}')"
+          [[ -n "$IDENTITY" ]] || { echo "no signing identity in SIGNING_CERT_P12"; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          # The same UTC timestamp scheme as local builds, so numbers always go up.
+          BUILD_NUMBER="$(date -u +%Y%m%d%H%M)"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+          BUILD_NUMBER=$BUILD_NUMBER scripts/build.sh
+
+      - name: Package and sign the update
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          mkdir release
+          ditto -c -k --keepParent build/Portal.app release/Portal.zip
+          echo "$SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/build-${BUILD_NUMBER}/" \
+            release
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-$BUILD_NUMBER" release/Portal.zip release/appcast.xml \
+            --title "Portal build $BUILD_NUMBER" \
+            --notes "$(git log -1 --pretty=%s)" \
+            --latest

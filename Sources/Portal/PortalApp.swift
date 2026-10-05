@@ -53,6 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             launcherPanel.show()
         }
 
+        AppUpdater.shared.isBusy = { [unowned self] in
+            launcherPanel.isVisible || clipboardPanel.isVisible || settingsWindow?.isVisible == true
+        }
+        AppUpdater.shared.start()
+
         buildMainMenu()
         buildStatusItem()
 
@@ -250,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             router.page = .quicklinks
             showSettings()
             router.editing = QuicklinkDraft(link: Quicklink(name: "", link: ""), isNew: true)
+        case "update": AppUpdater.shared.checkForUpdates()
         case "quit": NSApp.terminate(nil)
         default: break
         }
@@ -288,6 +294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === settingsWindow else { return }
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    @objc private func checkForUpdates() {
+        AppUpdater.shared.checkForUpdates()
     }
 
     @objc private func togglePause() {
@@ -332,6 +342,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pauseItem.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        if AppUpdater.shared.canCheck {
+            menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+        }
         menu.addItem(withTitle: "Quit Portal", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
     }
