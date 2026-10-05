@@ -514,3 +514,41 @@ import AppKit
         }
     }
 }
+
+@Suite struct LauncherGroupingTests {
+    private func item(_ id: String, _ kind: LaunchKind, section: String? = nil) -> LaunchItem {
+        var i = LaunchItem(id: id, name: id, path: "", kind: kind)
+        i.section = section
+        return i
+    }
+
+    @Test func eachHeadingShowsOnce() {
+        let ranked = [item("api", .quicklink), item("docs", .quicklink), item("dev", .snippet, section: "Snippets · acme-web"),
+                      item("repo", .quicklink), item("deploy", .snippet, section: "Snippets · acme-web")]
+        let grouped = LauncherModel.grouped(ranked)
+        #expect(grouped.map(\.id) == ["api", "docs", "repo", "dev", "deploy"])
+        let headings = grouped.map(\.heading)
+        #expect(zip(headings, headings.dropFirst()).filter { $0 != $1 }.count == 1)
+    }
+
+    @Test func bestMatchStaysFirst() {
+        let grouped = LauncherModel.grouped([item("calc", .calculator), item("x", .app), item("y", .quicklink), item("z", .app)])
+        #expect(grouped.map(\.id) == ["calc", "x", "z", "y"])
+    }
+}
+
+@Suite struct ClipAgeTests {
+    @Test func newClipsSayJustNow() {
+        let now = Date()
+        #expect(ClipAge.label(now, now: now) == "Just now")
+        #expect(ClipAge.label(now.addingTimeInterval(-59), now: now) == "Just now")
+        // A clip stamped a hair after the clock read must not read "in 0 sec."
+        #expect(ClipAge.label(now.addingTimeInterval(0.2), now: now) == "Just now")
+    }
+
+    @Test func olderClipsSayHowLongAgo() {
+        let now = Date()
+        let label = ClipAge.label(now.addingTimeInterval(-5 * 60), now: now)
+        #expect(label.contains("5") && label.contains("ago"))
+    }
+}

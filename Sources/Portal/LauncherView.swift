@@ -129,7 +129,7 @@ struct LauncherView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(model.results.enumerated()), id: \.element.id) { index, item in
                         if showsHeader(at: index) {
-                            SectionTitle(text: header(for: item))
+                            SectionTitle(text: item.heading)
                                 .padding(.top, index == 0 ? 2 : 12)
                         }
                         LaunchRow(item: item, link: model.quicklink(for: item), index: index,
@@ -158,20 +158,7 @@ struct LauncherView: View {
     }
 
     private func showsHeader(at index: Int) -> Bool {
-        index == 0 || header(for: model.results[index - 1]) != header(for: model.results[index])
-    }
-
-    private func header(for item: LaunchItem) -> String {
-        if let section = item.section { return section }
-        switch item.kind {
-        case .calculator: return "Calculator"
-        case .transform: return "Transform Selection"
-        case .finder: return "Finder Selection"
-        case .snippet, .folderAction: return "Snippets"
-        case .quicklink: return "Quicklinks"
-        case .app: return "Apps"
-        case .command: return "Portal"
-        }
+        index == 0 || model.results[index - 1].heading != model.results[index].heading
     }
 
     private var footer: some View {

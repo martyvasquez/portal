@@ -34,6 +34,20 @@ struct LaunchItem: Identifiable, Hashable, Sendable {
         self.lowerPath = Array("\(subtitle) \(keywords)".lowercased().utf8)
     }
 
+    /// The launcher heading this row shows under.
+    var heading: String {
+        if let section { return section }
+        switch kind {
+        case .calculator: return "Calculator"
+        case .transform: return "Transform Selection"
+        case .finder: return "Finder Selection"
+        case .snippet, .folderAction: return "Snippets"
+        case .quicklink: return "Quicklinks"
+        case .app: return "Apps"
+        case .command: return "Portal"
+        }
+    }
+
     static func == (a: LaunchItem, b: LaunchItem) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
 }
@@ -619,7 +633,7 @@ final class LauncherModel: ObservableObject {
                 recent += pool.filter { $0.kind == .quicklink && !taken.contains($0.id) }.prefix(limit - recent.count)
                 ranked = matching + Self.sectioned(pins, "Pinned") + Self.sectioned(recent, "Recent")
             } else {
-                ranked = inline + Ranker.rank(query: q, items: items, usage: usage, limit: 60)
+                ranked = Self.grouped(inline + Ranker.rank(query: q, items: items, usage: usage, limit: 60))
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -629,6 +643,18 @@ final class LauncherModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Keeps rows under one heading together, so each heading shows once. Groups keep the order of
+    /// their best match, and rows keep their rank within a group.
+    nonisolated static func grouped(_ items: [LaunchItem]) -> [LaunchItem] {
+        var order: [String] = []
+        var groups: [String: [LaunchItem]] = [:]
+        for item in items {
+            if groups[item.heading] == nil { order.append(item.heading) }
+            groups[item.heading, default: []].append(item)
+        }
+        return order.flatMap { groups[$0] ?? [] }
     }
 
     nonisolated private static func sectioned(_ items: [LaunchItem], _ section: String) -> [LaunchItem] {
