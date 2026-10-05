@@ -153,7 +153,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var groups: [(combo: KeyCombo, ids: [UUID], live: Bool)] = []
         for t in settings.values.transformers {
             guard let combo = t.hotKey else { continue }
-            let live = t.isGlobal || front.map(t.apps.contains) == true || (!t.sites.isEmpty && BrowserContext.isBrowser(front))
+            // Excluded sites are only known at press time, so a global key stays held in browsers.
+            let live = t.isGlobal ? !(front.map(t.excludedApps.contains) ?? false)
+                : front.map(t.apps.contains) == true || (!t.sites.isEmpty && BrowserContext.isBrowser(front))
             if let i = groups.firstIndex(where: { $0.combo.keyCode == combo.keyCode && $0.combo.modifiers == combo.modifiers }) {
                 groups[i].ids.append(t.id)
                 groups[i].live = groups[i].live || live
@@ -174,7 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func transformFromHotKey(_ ids: [UUID]) {
         let candidates = ids.compactMap { id in settings.values.transformers.first { $0.id == id } }
         let front = NSWorkspace.shared.frontmostApplication
-        let url = candidates.contains { !$0.sites.isEmpty } ? BrowserContext.currentURL(frontApp: front?.bundleIdentifier) : nil
+        let needsURL = candidates.contains { !$0.sites.isEmpty || !$0.excludedSites.isEmpty }
+        let url = needsURL ? BrowserContext.currentURL(frontApp: front?.bundleIdentifier) : nil
         let applies = candidates.filter { $0.applies(app: front?.bundleIdentifier, url: url) }
         guard let transformer = applies.first(where: { !$0.isGlobal }) ?? applies.first else { NSSound.beep(); return }
         clipboardPanel.hide()

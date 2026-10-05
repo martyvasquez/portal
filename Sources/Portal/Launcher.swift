@@ -385,7 +385,7 @@ final class LauncherModel: ObservableObject {
         } else {
             let all = settings.values.transformers
             let matches = all.filter { !$0.isGlobal && $0.applies(app: context.appID, url: context.url) }
-            let global = all.filter(\.isGlobal)
+            let global = all.filter { $0.isGlobal && $0.applies(app: context.appID, url: context.url) }
             if matches.isEmpty {
                 groups = [(section, global)]
             } else if settings.values.transformerListing == .onlyMatches {

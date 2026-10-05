@@ -403,6 +403,31 @@ import AppKit
         #expect(LauncherModel.promptSummary("Summarize {selection} in one line") == "Summarize in one line")
     }
 
+    @Test func globalTransformerHidesWhereExcluded() {
+        var t = Transformer(name: "Less Formal", prompt: "x")
+        t.excludedApps = ["com.mitchellh.ghostty"]
+        t.excludedSites = ["github.com"]
+        #expect(!t.applies(app: "com.mitchellh.ghostty", url: nil))
+        #expect(!t.applies(app: "com.google.Chrome", url: URL(string: "https://gist.github.com/x")))
+        #expect(t.applies(app: "com.google.Chrome", url: URL(string: "https://mail.google.com")))
+        #expect(t.applies(app: "com.apple.mail", url: nil))
+        // Once scoped, exclusions don't apply.
+        t.apps = ["com.mitchellh.ghostty"]
+        #expect(t.applies(app: "com.mitchellh.ghostty", url: nil))
+    }
+
+    @Test func exclusionsLetAScopedTransformerShareTheKey() {
+        var global = Transformer(name: "Polish", prompt: "x")
+        global.excludedApps = ["com.sublimetext.4"]
+        global.excludedSites = ["github.com"]
+        var sublime = Transformer(name: "JSON", prompt: "x"); sublime.apps = ["com.sublimetext.4"]
+        var gist = Transformer(name: "Gist", prompt: "x"); gist.sites = ["gist.github.com"]
+        var mail = Transformer(name: "Mail", prompt: "x"); mail.apps = ["com.apple.mail"]
+        #expect(!global.overlaps(sublime))
+        #expect(!gist.overlaps(global))
+        #expect(global.overlaps(mail))
+    }
+
     @Test func transformerScopeRoundTrips() throws {
         var t = Transformer(name: "A", prompt: "x")
         t.apps = ["com.apple.mail"]; t.sites = ["github.com"]
