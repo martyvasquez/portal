@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateFinderHotKey()
-                self?.updateTransformerHotKeys()
+                self?.updateScopedHotKeys()
             }
             .store(in: &cancellables)
 
@@ -127,64 +127,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let launcher: KeyCombo, clipboard: KeyCombo, finder: KeyCombo?, links: [Quicklink], transformers: [Transformer]
     }
 
-    private var linkHotKeyIDs: [UInt32] = []
-    private var transformerHotKeyIDs: [UInt32] = []
+    private var scopedHotKeyIDs: [UInt32] = []
 
     private func registerHotKeys() {
         HotKeyCenter.shared.register(id: 1, combo: settings.values.launcherHotKey) { [weak self] in self?.toggleLauncher() }
         HotKeyCenter.shared.register(id: 2, combo: settings.values.clipboardHotKey) { [weak self] in self?.toggleClipboard() }
 
         updateFinderHotKey()
-
-        linkHotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
-        linkHotKeyIDs = []
-        for (i, link) in settings.values.quicklinks.enumerated() {
-            guard let combo = link.hotKey else { continue }
-            let id = UInt32(100 + i)
-            linkHotKeyIDs.append(id)
-            HotKeyCenter.shared.register(id: id, combo: combo) { [weak self] in self?.openFromHotKey(link) }
-        }
-
-        updateTransformerHotKeys()
+        updateScopedHotKeys()
     }
 
-    /// Transformer hotkeys, held only while one of their transformers could apply in the front app,
-    /// so a scoped key keeps its normal meaning everywhere else. Transformers in separate scopes can
-    /// share a key: it's registered once and runs whichever one applies.
-    private func updateTransformerHotKeys() {
-        transformerHotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
-        transformerHotKeyIDs = []
+    /// What a quicklink or transformer hotkey runs.
+    private enum HotKeyTarget { case quicklink(UUID), transformer(UUID) }
+
+    /// Quicklink and transformer hotkeys, held only while one of their owners could apply in the
+    /// front app, so a scoped key keeps its normal meaning everywhere else. Owners in separate
+    /// scopes can share a key: it's registered once and runs whichever one applies.
+    private func updateScopedHotKeys() {
+        scopedHotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
+        scopedHotKeyIDs = []
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        var groups: [(combo: KeyCombo, ids: [UUID], live: Bool)] = []
-        for t in settings.values.transformers {
-            guard let combo = t.hotKey else { continue }
-            // Excluded sites are only known at press time, so a global key stays held in browsers.
-            let live = t.isGlobal ? !(front.map(t.excludedApps.contains) ?? false)
-                : front.map(t.apps.contains) == true || (!t.sites.isEmpty && BrowserContext.isBrowser(front))
+        var groups: [(combo: KeyCombo, targets: [HotKeyTarget], live: Bool)] = []
+        func add(_ combo: KeyCombo?, _ target: HotKeyTarget, _ scope: any Scoped) {
+            guard let combo else { return }
+            let live = scope.couldApply(frontApp: front)
             if let i = groups.firstIndex(where: { $0.combo.keyCode == combo.keyCode && $0.combo.modifiers == combo.modifiers }) {
-                groups[i].ids.append(t.id)
+                groups[i].targets.append(target)
                 groups[i].live = groups[i].live || live
             } else {
-                groups.append((combo, [t.id], live))
+                groups.append((combo, [target], live))
             }
         }
+        for q in settings.values.quicklinks { add(q.hotKey, .quicklink(q.id), q) }
+        for t in settings.values.transformers { add(t.hotKey, .transformer(t.id), t) }
         for (i, group) in groups.enumerated() where group.live {
             let id = UInt32(1000 + i)
-            transformerHotKeyIDs.append(id)
-            HotKeyCenter.shared.register(id: id, combo: group.combo) { [weak self] in self?.transformFromHotKey(group.ids) }
+            scopedHotKeyIDs.append(id)
+            HotKeyCenter.shared.register(id: id, combo: group.combo) { [weak self] in self?.runHotKey(group.targets) }
+        }
+    }
+
+    /// Of the owners sharing a key, a scoped one that applies here wins over a global one.
+    private func runHotKey(_ targets: [HotKeyTarget]) {
+        let v = settings.values
+        let candidates: [(target: HotKeyTarget, scope: any Scoped)] = targets.compactMap { target in
+            switch target {
+            case .quicklink(let id): v.quicklinks.first { $0.id == id }.map { (target, $0) }
+            case .transformer(let id): v.transformers.first { $0.id == id }.map { (target, $0) }
+            }
+        }
+        let front = NSWorkspace.shared.frontmostApplication
+        let needsURL = candidates.contains { !$0.scope.sites.isEmpty || !$0.scope.excludedSites.isEmpty }
+        let url = needsURL ? BrowserContext.currentURL(frontApp: front?.bundleIdentifier) : nil
+        let applies = candidates.filter { $0.scope.applies(app: front?.bundleIdentifier, url: url) }
+        guard let pick = applies.first(where: { !$0.scope.isGlobal }) ?? applies.first else { NSSound.beep(); return }
+        switch pick.target {
+        case .quicklink(let id): if let link = v.quicklinks.first(where: { $0.id == id }) { openFromHotKey(link) }
+        case .transformer(let id): if let t = v.transformers.first(where: { $0.id == id }) { transform(t, front: front) }
         }
     }
 
     /// Runs a transformer on the selection without picking it in the launcher. The launcher
     /// opens to show it working (and the result, for Preview); Replace and Copy close it when done.
-    /// Of transformers sharing the key, a scoped one that applies here wins over a global one.
-    private func transformFromHotKey(_ ids: [UUID]) {
-        let candidates = ids.compactMap { id in settings.values.transformers.first { $0.id == id } }
-        let front = NSWorkspace.shared.frontmostApplication
-        let needsURL = candidates.contains { !$0.sites.isEmpty || !$0.excludedSites.isEmpty }
-        let url = needsURL ? BrowserContext.currentURL(frontApp: front?.bundleIdentifier) : nil
-        let applies = candidates.filter { $0.applies(app: front?.bundleIdentifier, url: url) }
-        guard let transformer = applies.first(where: { !$0.isGlobal }) ?? applies.first else { NSSound.beep(); return }
+    private func transform(_ transformer: Transformer, front: NSRunningApplication?) {
         clipboardPanel.hide()
         launcherPanel.hide()
         guard AIService.shared.isSignedIn else {

@@ -510,8 +510,9 @@ final class LauncherModel: ObservableObject {
     /// Pasting into Finder does nothing useful, so there results are copied.
     private var canPaste: Bool { context.appID != "com.apple.finder" }
 
-    /// Rows for snippets: this folder's (.portal.json), this site's, this app's, then global.
-    private func makeSnippetItems() -> (folder: [LaunchItem], site: [LaunchItem], app: [LaunchItem], global: [LaunchItem]) {
+    /// Rows for snippets: this folder's (.portal.json), then the global ones not excluded here.
+    /// Site and app snippets show with their place, in `makePlaceItems`.
+    private func makeSnippetItems() -> (folder: [LaunchItem], global: [LaunchItem]) {
         func row(_ id: String, _ name: String, _ text: String, section: String) -> LaunchItem { Self.snippetRow(id, name, text, section: section) }
         var folder: [LaunchItem] = []
         if let root = context.root {
@@ -542,17 +543,32 @@ final class LauncherModel: ObservableObject {
                 folder.append(editRow)
             }
         }
-        let all = settings.values.snippets
-        var site: [LaunchItem] = []
-        if let url = context.url {
-            site = all.filter { s in s.sites.contains { SiteMatcher.matches($0, url) } }
-                .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets · \(SiteMatcher.label(url))") }
+        let global = settings.values.snippets.filter { $0.isGlobal && $0.applies(app: context.appID, url: context.url) }
+            .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets") }
+        return (folder, global)
+    }
+
+    /// Quicklinks and snippets for the site you're on, then the app you're in: one heading per
+    /// place, quicklinks first. Something scoped to both shows once, with the site.
+    private func makePlaceItems() -> [LaunchItem] {
+        let links = settings.values.quicklinks.filter { !$0.isGlobal }
+        let snippets = settings.values.snippets.filter { !$0.isGlobal }
+        var rows: [LaunchItem] = []
+        var taken = Set<String>()
+        func add(_ section: String, _ placeLinks: [Quicklink], _ placeSnippets: [Snippet]) {
+            let items = placeLinks.map(quicklinkRow)
+                + placeSnippets.map { Self.snippetRow("snippet:\($0.id)", $0.name, $0.text, section: nil) }
+            for var item in items where taken.insert(item.id).inserted {
+                item.section = section
+                rows.append(item)
+            }
         }
-        let appName = context.appName ?? "This App"
-        let app = all.filter { s in context.appID.map { s.apps.contains($0) } ?? false }
-            .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets · \(appName)") }
-        let global = all.filter(\.isGlobal).map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets") }
-        return (folder, site, app, global)
+        if let url = context.url {
+            add("For \(SiteMatcher.label(url))", links.filter { $0.matchesSite(url) }, snippets.filter { $0.matchesSite(url) })
+        }
+        let app = context.appID
+        add("For \(context.appName ?? "This App")", links.filter { $0.matchesApp(app) }, snippets.filter { $0.matchesApp(app) })
+        return rows
     }
 
     static func snippetRow(_ id: String, _ name: String, _ text: String, section: String?) -> LaunchItem {
@@ -587,17 +603,20 @@ final class LauncherModel: ObservableObject {
         return items
     }
 
+    /// Global quicklinks, less the ones excluded here; scoped ones show with their place.
     private var quicklinkItems: [LaunchItem] {
-        settings.values.quicklinks.map { q in
-            let shown = q.isFolder ? Paths.abbreviate(Paths.expand(q.link).path) : q.link
-            var item = LaunchItem(id: q.id.uuidString, name: q.name, subtitle: shown,
-                                  path: q.isFolder ? Paths.expand(q.link).path : "", kind: .quicklink,
-                                  keywords: q.appName)
-            item.quicklinkID = q.id
-            item.hotKey = q.hotKey?.display
-            item.openWith = q.appPath
-            return item
-        }
+        settings.values.quicklinks.filter { $0.isGlobal && $0.applies(app: context.appID, url: context.url) }.map(quicklinkRow)
+    }
+
+    private func quicklinkRow(_ q: Quicklink) -> LaunchItem {
+        let shown = q.isFolder ? Paths.abbreviate(Paths.expand(q.link).path) : q.link
+        var item = LaunchItem(id: q.id.uuidString, name: q.name, subtitle: shown,
+                              path: q.isFolder ? Paths.expand(q.link).path : "", kind: .quicklink,
+                              keywords: q.appName)
+        item.quicklinkID = q.id
+        item.hotKey = q.hotKey?.display
+        item.openWith = q.appPath
+        return item
     }
 
     func search() {
@@ -607,14 +626,16 @@ final class LauncherModel: ObservableObject {
         let links = quicklinkItems
         let finder = makeFinderItems()
         let snippets = makeSnippetItems()
+        let places = transformOnly ? [] : makePlaceItems()
         let transforms = makeTransformItems()
         let transformOnly = transformOnly
         let inline = (transformOnly ? [] : calculatorItem(query).map { [$0] } ?? [])
             + (inlinePromptItem(query.trimmingCharacters(in: .whitespaces)).map { [$0] } ?? [])
-        // What fits where you are: the selection's transformers, Finder's selection, this folder's,
-        // site's, and app's snippets. These always show in full; everything else earns its place.
+        // What fits where you are: the selection's transformers, Finder's selection, this folder's
+        // snippets, then this site's and app's quicklinks and snippets. These always show in full;
+        // everything else earns its place.
         let matching = transformOnly ? transforms.matching
-            : transforms.matching + finder + snippets.folder + snippets.site + snippets.app
+            : transforms.matching + finder + snippets.folder + places
         let general = transformOnly ? [] : transforms.others + snippets.global + Self.commands + links + apps
         let items = matching + general
         let usage = usage.entries
@@ -876,7 +897,8 @@ extension LauncherModel {
     /// Anything not tied to an app, site, folder, or selection can be pinned; those show up on their own.
     func isPinnable(_ item: LaunchItem) -> Bool {
         switch item.kind {
-        case .quicklink, .app: return true
+        case .quicklink: return settings.values.quicklinks.contains { $0.id == item.quicklinkID && $0.isGlobal }
+        case .app: return true
         case .command: return item.id != "cmd:quit"
         case .snippet: return settings.values.snippets.contains { "snippet:\($0.id)" == item.id && $0.isGlobal }
         case .transform: return settings.values.transformers.contains { $0.id == item.transformerID && $0.isGlobal }
@@ -912,16 +934,25 @@ extension LauncherModel {
             guard FileManager.default.fileExists(atPath: id) else { return nil }
             return LaunchItem(id: id, name: SharedSettings.appName(id), path: id, kind: .app)
         }
-        return quicklinkItems.first { $0.id == id }
+        guard let q = settings.values.quicklinks.first(where: { $0.id.uuidString == id && $0.isGlobal }) else { return nil }
+        return quicklinkRow(q)
     }
 
-    /// Pinned rows for the launcher right now. Transformers only show with a selection to work on.
+    /// Pinned rows for the launcher right now, less any excluded here. Transformers only show
+    /// with a selection to work on.
     fileprivate func pinnedRows() -> [LaunchItem] {
-        settings.values.pinned.compactMap(pinnedRow).filter { item in
-            guard item.kind == .transform else { return true }
-            guard transformInput != nil, ai.isSignedIn,
-                  let t = settings.values.transformers.first(where: { $0.id == item.transformerID }) else { return false }
-            return t.applies(app: context.appID, url: context.url)
+        let v = settings.values
+        return v.pinned.compactMap(pinnedRow).filter { item in
+            let scope: (any Scoped)?
+            switch item.kind {
+            case .transform:
+                guard transformInput != nil, ai.isSignedIn else { return false }
+                scope = v.transformers.first { $0.id == item.transformerID }
+            case .quicklink: scope = v.quicklinks.first { $0.id == item.quicklinkID }
+            case .snippet: scope = v.snippets.first { "snippet:\($0.id)" == item.id }
+            default: return true
+            }
+            return scope?.applies(app: context.appID, url: context.url) ?? false
         }
     }
 }

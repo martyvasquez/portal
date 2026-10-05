@@ -105,6 +105,22 @@ import AppKit
         #expect(link.appName == "Google Chrome")
     }
 
+    @Test func quicklinksSavedBeforeScopesLoadAsGlobal() throws {
+        let json = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"Dev","link":"~/Development","appPath":"/Applications/Ghostty.app"}"#
+        let link = try JSONDecoder().decode(Quicklink.self, from: Data(json.utf8))
+        #expect(link.name == "Dev" && link.appPath == "/Applications/Ghostty.app" && link.isGlobal && link.excludedApps.isEmpty)
+    }
+
+    @Test func quicklinkScopeRoundTrips() throws {
+        var link = Quicklink(name: "Ticket", link: "https://bytelaunch.atlassian.net/browse/{query}")
+        link.sites = ["*.atlassian.net"]
+        link.hotKey = KeyCombo.clipboardDefault
+        let back = try JSONDecoder().decode(Quicklink.self, from: JSONEncoder().encode(link))
+        #expect(back == link)
+        #expect(back.applies(app: "com.google.Chrome", url: URL(string: "https://bytelaunch.atlassian.net/jira")))
+        #expect(!back.applies(app: "com.apple.mail", url: nil))
+    }
+
     @Test func bareDomainGetsScheme() {
         #expect(Quicklink(name: "x", link: "news.ycombinator.com").resolvedURL()?.absoluteString == "https://news.ycombinator.com")
     }
@@ -319,6 +335,18 @@ import AppKit
         #expect(SiteMatcher.label(url("https://www.google.com/search?q=x")) == "google.com")
     }
 
+    @Test func globalSnippetHidesWhereExcluded() throws {
+        var s = Snippet(name: "Sig", text: "— Marty")
+        s.excludedApps = ["com.mitchellh.ghostty"]
+        #expect(!s.applies(app: "com.mitchellh.ghostty", url: nil))
+        #expect(s.applies(app: "com.apple.mail", url: nil))
+        let back = try JSONDecoder().decode(Snippet.self, from: JSONEncoder().encode(s))
+        #expect(back.excludedApps == ["com.mitchellh.ghostty"])
+        s.apps = ["com.apple.mail"]
+        s.dropUnusedExclusions()
+        #expect(s.excludedApps.isEmpty)
+    }
+
     @Test func oldSnippetsWithoutSitesStillLoad() throws {
         let json = #"{"snippets":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"Email","text":"a@b.co","apps":[]}]}"#
         let s = try JSONDecoder().decode(SharedSettings.self, from: Data(json.utf8))
@@ -405,6 +433,24 @@ import AppKit
         #expect(chrome.overlaps(github))
         var gitlab = Transformer(name: "G", prompt: "x"); gitlab.sites = ["gitlab.com"]
         #expect(!github.overlaps(gitlab))
+    }
+
+    @Test func scopesOverlapAcrossKinds() {
+        var github = Quicklink(name: "PRs", link: "https://github.com/pulls"); github.sites = ["github.com"]
+        var mail = Transformer(name: "Reply", prompt: "x"); mail.apps = ["com.apple.mail"]
+        var gist = Transformer(name: "Gist", prompt: "x"); gist.sites = ["gist.github.com"]
+        #expect(!github.overlaps(mail))
+        #expect(github.overlaps(gist))
+        #expect(Quicklink(name: "Dev", link: "~/Development").overlaps(mail))
+    }
+
+    @Test func hotKeyIsHeldWhereItCouldApply() {
+        var site = Quicklink(name: "PRs", link: "https://github.com/pulls"); site.sites = ["github.com"]
+        #expect(site.couldApply(frontApp: "com.google.Chrome"))   // the tab is only read on press
+        #expect(!site.couldApply(frontApp: "com.apple.mail"))
+        var global = Quicklink(name: "Dev", link: "~/Development"); global.excludedApps = ["com.mitchellh.ghostty"]
+        #expect(!global.couldApply(frontApp: "com.mitchellh.ghostty"))
+        #expect(global.couldApply(frontApp: nil))
     }
 
     @MainActor @Test func rowSubtitleDropsTheSelectionPlaceholder() {

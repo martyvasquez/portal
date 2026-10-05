@@ -18,7 +18,7 @@ enum TransformAction: String, Codable, CaseIterable, Identifiable {
 }
 
 /// A saved prompt that rewrites the selected text (or a clip) with ChatGPT.
-struct Transformer: Codable, Equatable, Identifiable {
+struct Transformer: Codable, Equatable, Identifiable, Scoped {
     var id = UUID()
     var name: String
     var prompt: String
@@ -33,60 +33,6 @@ struct Transformer: Codable, Equatable, Identifiable {
     /// For a global transformer: apps and sites where it stays hidden. Ignored once it's scoped.
     var excludedApps: [String] = []
     var excludedSites: [String] = []
-
-    var isGlobal: Bool { apps.isEmpty && sites.isEmpty }
-
-    /// True in one of its apps or on one of its sites; for a global one, anywhere it isn't excluded.
-    func applies(app: String?, url: URL?) -> Bool {
-        if isGlobal { return !isExcluded(app: app, url: url) }
-        if let app, apps.contains(app) { return true }
-        if let url, sites.contains(where: { SiteMatcher.matches($0, url) }) { return true }
-        return false
-    }
-
-    func isExcluded(app: String?, url: URL?) -> Bool {
-        guard isGlobal else { return false }
-        if let app, excludedApps.contains(app) { return true }
-        if let url, excludedSites.contains(where: { SiteMatcher.matches($0, url) }) { return true }
-        return false
-    }
-
-    /// Whether both could show in the same place, so one hotkey can't serve both.
-    func overlaps(_ other: Transformer) -> Bool {
-        if isGlobal && other.isGlobal { return true }
-        if isGlobal { return !other.isInside(exclusionsOf: self) }
-        if other.isGlobal { return !isInside(exclusionsOf: other) }
-        if !Set(apps).isDisjoint(with: other.apps) { return true }
-        // Sites only match in browsers: a browser in one and a site in the other can meet.
-        if apps.contains(where: BrowserContext.isBrowser) && !other.sites.isEmpty { return true }
-        if other.apps.contains(where: BrowserContext.isBrowser) && !sites.isEmpty { return true }
-        return sites.contains { a in other.sites.contains { b in Self.sitesOverlap(a, b) } }
-    }
-
-    /// True when every place this scoped transformer shows is one `global` is hidden from.
-    private func isInside(exclusionsOf global: Transformer) -> Bool {
-        apps.allSatisfy(global.excludedApps.contains)
-            && sites.allSatisfy { site in global.excludedSites.contains { Self.covers($0, site) } }
-    }
-
-    /// Whether every URL `site` matches is also matched by `pattern`.
-    private static func covers(_ pattern: String, _ site: String) -> Bool {
-        var p = site.lowercased()
-        if p.hasPrefix("*.") { p.removeFirst(2) }
-        return URL(string: "https://" + p).map { SiteMatcher.matches(pattern, $0) } ?? false
-    }
-
-    /// `github.com` and `gist.github.com/me` overlap; `github.com` and `gitlab.com` don't.
-    static func sitesOverlap(_ a: String, _ b: String) -> Bool {
-        func probe(_ pattern: String) -> URL? {
-            var p = pattern.lowercased()
-            if p.hasPrefix("*.") { p.removeFirst(2) }
-            return URL(string: "https://" + p)
-        }
-        if let u = probe(b), SiteMatcher.matches(a, u) { return true }
-        if let u = probe(a), SiteMatcher.matches(b, u) { return true }
-        return false
-    }
 
     init(name: String, prompt: String, action: TransformAction = .preview) {
         self.name = name

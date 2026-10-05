@@ -214,29 +214,10 @@ private struct TransformerEditor: View {
                         Text(actionHelp).font(.caption).foregroundStyle(.tertiary)
                     }
                 }
-                GridRow {
-                    Text("Show in").foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 5) {
-                        PlaceChips(apps: $transformer.apps, sites: $transformer.sites, newSite: $newSite,
-                                   leading: transformer.isGlobal ? "Everywhere" : nil)
-                        Text(transformer.isGlobal
-                             ? "Shows on any highlighted text. Add apps or websites to show it only there."
-                             : "Shows in any of these apps or on any of these sites. Clips from clipboard history see every transformer.")
-                            .font(.caption).foregroundStyle(.tertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if transformer.isGlobal {
-                    GridRow {
-                        Text("Except in").foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 5) {
-                            PlaceChips(apps: $transformer.excludedApps, sites: $transformer.excludedSites,
-                                       newSite: $newExcludedSite, leading: nil)
-                            Text("Hidden in these apps and on these sites, like terminals where it never makes sense.")
-                                .font(.caption).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
+                ScopeRows(item: $transformer, newSite: $newSite, newExcludedSite: $newExcludedSite,
+                          globalHelp: "Shows on any highlighted text. Add apps or websites to show it only there.",
+                          scopedHelp: "Shows in any of these apps or on any of these sites. Clips from clipboard history see every transformer.",
+                          excludedHelp: "Hidden in these apps and on these sites, like terminals where it never makes sense.")
                 GridRow {
                     Text("Hotkey").foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 5) {
@@ -315,7 +296,7 @@ private struct TransformerEditor: View {
     }
 
     private var hotKeyClash: String? {
-        transformer.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: transformer.id, transformer: transformer) }
+        transformer.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: transformer.id, scope: transformer) }
     }
 
     @State private var newSite = ""
@@ -329,13 +310,8 @@ private struct TransformerEditor: View {
     }
 
     private func save() {
-        PlaceChips.add(&newSite, to: &transformer.sites)
-        PlaceChips.add(&newExcludedSite, to: &transformer.excludedSites)
+        ScopeRows.commit(&transformer, newSite: &newSite, newExcludedSite: &newExcludedSite)
         var saved = transformer
-        if !saved.isGlobal {   // a scoped transformer lists where it shows; exclusions don't apply
-            saved.excludedApps = []
-            saved.excludedSites = []
-        }
         saved.name = saved.name.trimmingCharacters(in: .whitespaces)
         if saved.name.isEmpty { saved.name = String(LauncherModel.oneLine(saved.prompt).prefix(40)) }
         if let i = settings.values.transformers.firstIndex(where: { $0.id == saved.id }) {
@@ -472,78 +448,5 @@ private struct ContinueWithChatGPTButton: View {
                 .background(colorScheme == .dark ? Color.white : Color.black, in: Capsule())
         }
         .buttonStyle(.plain)
-    }
-}
-
-extension Transformer {
-    /// "Mail, github.com" for a scoped transformer's card, "Not in Ghostty" for a global one with
-    /// exclusions; nil when it shows everywhere.
-    var scopeLabel: String? {
-        func list(_ names: [String]) -> String? {
-            guard let first = names.first else { return nil }
-            if names.count == 1 { return first }
-            if names.count == 2 { return "\(first), \(names[1])" }
-            return "\(first) +\(names.count - 1)"
-        }
-        if !isGlobal { return list(apps.map { SharedSettings.appName(bundleID: $0) } + sites) }
-        return list(excludedApps.map { SharedSettings.appName(bundleID: $0) } + excludedSites).map { "Not in \($0)" }
-    }
-}
-
-/// App and website chips with buttons to add more: where a transformer shows, or where it's hidden.
-private struct PlaceChips: View {
-    @Binding var apps: [String]
-    @Binding var sites: [String]
-    @Binding var newSite: String
-    let leading: String?
-
-    var body: some View {
-        FlowLayout(spacing: 6) {
-            if let leading {
-                Text(leading)
-                    .foregroundStyle(.secondary)
-                    .padding(.trailing, 4).padding(.vertical, 3)
-            }
-            ForEach(apps, id: \.self) { id in
-                Chip(label: SharedSettings.appName(bundleID: id), icon: IconCache.appIcon(bundleID: id)) {
-                    apps.removeAll { $0 == id }
-                }
-            }
-            ForEach(sites, id: \.self) { site in
-                Chip(label: site, icon: NSImage(systemSymbolName: "globe", accessibilityDescription: nil)) {
-                    sites.removeAll { $0 == site }
-                }
-            }
-            Button("Add App…", action: addApp)
-            TextField("Add website", text: $newSite)
-                .textFieldStyle(.plain)
-                .font(.callout)
-                .frame(width: 130)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                .onSubmit { Self.add(&newSite, to: &sites) }
-        }
-    }
-
-    /// Adds a typed site ("github.com", "*.atlassian.net", "github.com/martyvasquez") and clears the field.
-    static func add(_ typed: inout String, to sites: inout [String]) {
-        var site = typed.trimmingCharacters(in: .whitespaces).lowercased()
-        if let scheme = site.range(of: "://") { site = String(site[scheme.upperBound...]) }
-        while site.hasSuffix("/") { site.removeLast() }
-        typed = ""
-        guard !site.isEmpty, !sites.contains(site) else { return }
-        sites.append(site)
-    }
-
-    private func addApp() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Add"
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            if let id = Bundle(url: url)?.bundleIdentifier, !apps.contains(id) { apps.append(id) }
-        }
     }
 }

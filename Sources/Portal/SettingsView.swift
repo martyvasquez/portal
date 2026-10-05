@@ -294,6 +294,7 @@ private struct QuicklinkCard: View {
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 12)
+            if let scope = link.scopeLabel { Pill(text: scope) }
             if link.needsQuery { Pill(text: "Query") }
             Pill(text: link.appName)
             if let hotKey = link.hotKey { KeyCap(text: hotKey.display) }
@@ -406,6 +407,9 @@ private struct QuicklinkEditor: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+                ScopeRows(item: $link, newSite: $newSite, newExcludedSite: $newExcludedSite,
+                          globalHelp: "Shows in the launcher everywhere. Add apps or websites to show it only there.",
+                          scopedHelp: "Shows at the top of the launcher in any of these apps or on any of these sites.")
                 GridRow {
                     Text("Hotkey").foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 5) {
@@ -414,7 +418,8 @@ private struct QuicklinkEditor: View {
                             Label("Already used by \(clash).", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption).foregroundStyle(.orange)
                         } else {
-                            Text("Opens this quicklink from anywhere, no launcher needed.")
+                            Text(link.isGlobal ? "Opens this quicklink from anywhere, no launcher needed."
+                                 : "Opens this quicklink, only where it shows. Others can use the same key elsewhere.")
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
                     }
@@ -438,9 +443,12 @@ private struct QuicklinkEditor: View {
             }
         }
         .padding(22)
-        .frame(width: 500)
+        .frame(width: 540)
         .tint(Theme.accent)
     }
+
+    @State private var newSite = ""
+    @State private var newExcludedSite = ""
 
     private var isValid: Bool {
         !link.link.trimmingCharacters(in: .whitespaces).isEmpty
@@ -461,10 +469,11 @@ private struct QuicklinkEditor: View {
     }
 
     private var hotKeyClash: String? {
-        link.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: link.id) }
+        link.hotKey.flatMap { HotKeyClash.owner(of: $0, in: settings.values, excluding: link.id, scope: link) }
     }
 
     private func save() {
+        ScopeRows.commit(&link, newSite: &newSite, newExcludedSite: &newExcludedSite)
         var saved = link
         saved.link = saved.link.trimmingCharacters(in: .whitespaces)
         if saved.isFolder { saved.link = Paths.abbreviate(Paths.expand(saved.link).path) }
@@ -620,8 +629,6 @@ private struct SnippetDraft: Identifiable {
     var id: UUID { snippet.id }
 }
 
-private enum SnippetScope: Hashable { case everywhere, apps, sites }
-
 struct Chip: View {
     let label: String
     let icon: NSImage?
@@ -652,6 +659,7 @@ private struct SnippetCard: View {
                 }
             }
             Spacer(minLength: 12)
+            if snippet.isGlobal, let scope = snippet.scopeLabel { Pill(text: scope) }
             if snippet.apps.count > 1 { Pill(text: "\(snippet.apps.count) apps") }
             if snippet.sites.count > 1 { Pill(text: "\(snippet.sites.count) sites") }
         }
@@ -670,7 +678,6 @@ private struct SnippetEditor: View {
 
     init(draft: SnippetDraft, settings: SettingsStore, dismiss: @escaping () -> Void) {
         _snippet = State(initialValue: draft.snippet)
-        _scope = State(initialValue: !draft.snippet.sites.isEmpty ? .sites : !draft.snippet.apps.isEmpty ? .apps : .everywhere)
         isNew = draft.isNew
         self.settings = settings
         self.dismiss = dismiss
@@ -692,42 +699,10 @@ private struct SnippetEditor: View {
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Show in", selection: $scope) {
-                    Text("Every App").tag(SnippetScope.everywhere)
-                    Text("Only These Apps").tag(SnippetScope.apps)
-                    Text("Only These Sites").tag(SnippetScope.sites)
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                switch scope {
-                case .everywhere:
-                    EmptyView()
-                case .apps:
-                    FlowLayout(spacing: 6) {
-                        ForEach(snippet.apps, id: \.self) { id in
-                            Chip(label: SnippetsPage.appName(id), icon: IconCache.appIcon(bundleID: id)) {
-                                snippet.apps.removeAll { $0 == id }
-                            }
-                        }
-                        Button("Add App…", action: addApp)
-                    }
-                case .sites:
-                    FlowLayout(spacing: 6) {
-                        ForEach(snippet.sites, id: \.self) { site in
-                            Chip(label: site, icon: nil) { snippet.sites.removeAll { $0 == site } }
-                        }
-                        TextField("github.com", text: $newSite)
-                            .textFieldStyle(.plain)
-                            .font(.callout)
-                            .frame(width: 150)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                            .onSubmit(addSite)
-                    }
-                    Text("Press Return to add. `github.com` includes its subdomains; `*.atlassian.net` matches any; `github.com/martyvasquez` limits to that path.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 14) {
+                ScopeRows(item: $snippet, newSite: $newSite, newExcludedSite: $newExcludedSite,
+                          globalHelp: "Shows in the launcher everywhere. Add apps or websites to show it only there.",
+                          scopedHelp: "Shows at the top of the launcher in any of these apps or on any of these sites.")
             }
 
             HStack {
@@ -743,45 +718,19 @@ private struct SnippetEditor: View {
                 Button(isNew ? "Add Snippet" : "Save", action: save)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(snippet.text.isEmpty
-                              || (scope == .apps && snippet.apps.isEmpty)
-                              || (scope == .sites && snippet.sites.isEmpty && newSite.trimmingCharacters(in: .whitespaces).isEmpty))
+                    .disabled(snippet.text.isEmpty)
             }
         }
         .padding(22)
-        .frame(width: 520)
+        .frame(width: 540)
         .tint(Theme.accent)
     }
 
-    @State private var scope: SnippetScope = .everywhere
     @State private var newSite = ""
-
-    private func addSite() {
-        var site = newSite.trimmingCharacters(in: .whitespaces).lowercased()
-        if let scheme = site.range(of: "://") { site = String(site[scheme.upperBound...]) }
-        while site.hasSuffix("/") { site.removeLast() }
-        newSite = ""
-        guard !site.isEmpty, !snippet.sites.contains(site) else { return }
-        snippet.sites.append(site)
-    }
-
-    private func addApp() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Add"
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            if let id = Bundle(url: url)?.bundleIdentifier, !snippet.apps.contains(id) { snippet.apps.append(id) }
-        }
-    }
+    @State private var newExcludedSite = ""
 
     private func save() {
-        if !newSite.isEmpty { addSite() }
-        // One scope at a time: keep only the list for the chosen one.
-        if scope != .apps { snippet.apps = [] }
-        if scope != .sites { snippet.sites = [] }
+        ScopeRows.commit(&snippet, newSite: &newSite, newExcludedSite: &newExcludedSite)
         if let i = settings.values.snippets.firstIndex(where: { $0.id == snippet.id }) {
             settings.values.snippets[i] = snippet
         } else {
@@ -946,7 +895,7 @@ private struct DefaultResultsPage: View {
 
     private var addMenu: some View {
         let pinned = Set(settings.values.pinned)
-        let links = settings.values.quicklinks.filter { !pinned.contains($0.id.uuidString) }
+        let links = settings.values.quicklinks.filter { $0.isGlobal && !pinned.contains($0.id.uuidString) }
         let snippets = settings.values.snippets.filter { $0.isGlobal && !pinned.contains("snippet:\($0.id)") }
         let transformers = settings.values.transformers.filter { $0.isGlobal && !pinned.contains("transform:\($0.id)") }
         let commands = LauncherModel.commands.filter { launcher.isPinnable($0) && !pinned.contains($0.id) }
@@ -1655,13 +1604,13 @@ private struct SyncPage: View {
 
 enum HotKeyClash {
     /// Who else uses `combo`: Portal's own hotkeys, another quicklink or transformer, or macOS.
-    /// Pass `transformer` (the one being edited) so others with this key in separate scopes don't count.
-    static func owner(of combo: KeyCombo, in v: SharedSettings, excluding id: UUID, transformer: Transformer? = nil) -> String? {
+    /// `scope` is where the one being edited shows, so others with this key in separate scopes don't count.
+    static func owner(of combo: KeyCombo, in v: SharedSettings, excluding id: UUID, scope: any Scoped) -> String? {
         func same(_ other: KeyCombo?) -> Bool { other?.keyCode == combo.keyCode && other?.modifiers == combo.modifiers }
         if same(v.launcherHotKey) { return "the launcher" }
         if same(v.clipboardHotKey) { return "clipboard history" }
-        if let other = v.quicklinks.first(where: { $0.id != id && same($0.hotKey) }) { return "“\(other.name)”" }
-        if let other = v.transformers.first(where: { $0.id != id && same($0.hotKey) && transformer?.overlaps($0) != false }) {
+        if let other = v.quicklinks.first(where: { $0.id != id && same($0.hotKey) && scope.overlaps($0) }) { return "“\(other.name)”" }
+        if let other = v.transformers.first(where: { $0.id != id && same($0.hotKey) && scope.overlaps($0) }) {
             return "“\(other.name)”"
         }
         return SystemHotKeys.conflict(for: combo)

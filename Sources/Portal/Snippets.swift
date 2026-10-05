@@ -2,15 +2,16 @@ import AppKit
 import Carbon.HIToolbox
 
 /// A global, per-app, or per-site snippet, stored in settings (synced via iCloud).
-struct Snippet: Codable, Equatable, Identifiable {
+struct Snippet: Codable, Equatable, Identifiable, Scoped {
     var id = UUID()
     var name: String
     var text: String
     var apps: [String] = []     // bundle IDs
     var sites: [String] = []    // site patterns like "github.com" or "*.atlassian.net/wiki"
                                 // (neither set = every app)
+    var excludedApps: [String] = []
+    var excludedSites: [String] = []
 
-    var isGlobal: Bool { apps.isEmpty && sites.isEmpty }
     var title: String { name.isEmpty ? text : name }
 
     init(name: String, text: String, apps: [String] = [], sites: [String] = []) {
@@ -20,7 +21,7 @@ struct Snippet: Codable, Equatable, Identifiable {
         self.sites = sites
     }
 
-    // Snippets saved before `sites` existed must still load.
+    // Snippets saved before `sites` or exclusions existed must still load.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -28,6 +29,8 @@ struct Snippet: Codable, Equatable, Identifiable {
         text = try c.decode(String.self, forKey: .text)
         apps = try c.decodeIfPresent([String].self, forKey: .apps) ?? []
         sites = try c.decodeIfPresent([String].self, forKey: .sites) ?? []
+        excludedApps = (try? c.decodeIfPresent([String].self, forKey: .excludedApps)) ?? []
+        excludedSites = (try? c.decodeIfPresent([String].self, forKey: .excludedSites)) ?? []
     }
 }
 

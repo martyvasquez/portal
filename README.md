@@ -101,6 +101,10 @@ Ghostty from anywhere.
 Put `{query}` in a link (`https://github.com/search?q={query}`) and the launcher asks for text before
 opening it. Settings groups quicklinks by the app they open in; drag within a group to reorder them.
 
+Like snippets and transformers, a quicklink can be scoped. Add apps or websites under **Show in** and
+it shows at the top of the launcher only there, under that place's heading ("For github.com"), with its
+hotkey working only there too. A global quicklink can list places under **Except in** where it stays hidden.
+
 <p align="center">
   <img src="docs/images/settings-quicklinks.png" width="80%" alt="Quicklinks settings grouped by Finder, Ghostty, Google Chrome, Safari, and Sublime Text">
 </p>
@@ -108,14 +112,17 @@ opening it. Settings groups quicklinks by the app they open in; drag within a gr
 ### Snippets
 
 Snippets are text the launcher pastes into the app you were in. `↩` pastes and then restores your
-clipboard; in Finder it copies instead. Each snippet has one of four scopes:
+clipboard; in Finder it copies instead. Each snippet has one of four scopes (a snippet can list both
+apps and sites):
 
 | Scope | Where it's defined | Shows when |
 |---|---|---|
 | **Folder** | `.portal.json` in the repo (travels with git) | a terminal is in front and in that folder or below it |
-| **Site** | Settings → Snippets → Only These Sites | Chrome, Safari, Arc, Brave, or Edge is on a matching page |
-| **App** | Settings → Snippets → Only These Apps | that app is in front |
-| **Global** | Settings → Snippets → Every App | always |
+| **Site** | Settings → Snippets → Show in → Add website | Chrome, Safari, Arc, Brave, or Edge is on a matching page |
+| **App** | Settings → Snippets → Show in → Add App | that app is in front |
+| **Global** | Settings → Snippets (nothing under Show in) | everywhere except the places under **Except in** |
+
+Site and app snippets show under the place's heading ("For github.com"), after that place's quicklinks.
 
 <p align="center">
   <img src="docs/images/launcher.png" width="49%" alt="The launcher in a terminal inside the acme-web repo, showing that repo's snippets first">

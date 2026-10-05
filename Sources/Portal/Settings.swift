@@ -40,14 +40,40 @@ struct KeyCombo: Codable, Equatable {
 }
 
 /// A named link to a folder or URL that opens in a chosen app (like Raycast Quicklinks).
-struct Quicklink: Codable, Equatable, Identifiable {
+struct Quicklink: Codable, Equatable, Identifiable, Scoped {
     var id = UUID()
     var name: String
     var link: String            // folder path (stored with ~) or URL; may contain {query}
     var appPath: String?        // nil = system default app
     var hotKey: KeyCombo?
+    /// Where it shows in the launcher (and its hotkey works). Neither = everywhere but the exclusions.
+    var apps: [String] = []
+    var sites: [String] = []
+    var excludedApps: [String] = []
+    var excludedSites: [String] = []
 
     static let placeholder = "{query}"
+
+    init(name: String, link: String, appPath: String? = nil, hotKey: KeyCombo? = nil) {
+        self.name = name
+        self.link = link
+        self.appPath = appPath
+        self.hotKey = hotKey
+    }
+
+    // Quicklinks saved before scopes existed must still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        link = try c.decode(String.self, forKey: .link)
+        appPath = try c.decodeIfPresent(String.self, forKey: .appPath)
+        hotKey = try c.decodeIfPresent(KeyCombo.self, forKey: .hotKey)
+        apps = (try? c.decodeIfPresent([String].self, forKey: .apps)) ?? []
+        sites = (try? c.decodeIfPresent([String].self, forKey: .sites)) ?? []
+        excludedApps = (try? c.decodeIfPresent([String].self, forKey: .excludedApps)) ?? []
+        excludedSites = (try? c.decodeIfPresent([String].self, forKey: .excludedSites)) ?? []
+    }
 
     var needsQuery: Bool { link.contains(Self.placeholder) }
 
