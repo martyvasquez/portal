@@ -17,20 +17,6 @@ enum TransformAction: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// When transformers match the app or site you're in, the launcher shows them first, then the
-/// global ones; or only them. With no matches, the global ones show either way.
-enum TransformerListing: String, Codable, CaseIterable, Identifiable {
-    case matchesFirst, onlyMatches
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .matchesFirst: "Matches First, Then Everywhere"
-        case .onlyMatches: "Only Matches"
-        }
-    }
-}
-
 /// A saved prompt that rewrites the selected text (or a clip) with ChatGPT.
 struct Transformer: Codable, Equatable, Identifiable {
     var id = UUID()

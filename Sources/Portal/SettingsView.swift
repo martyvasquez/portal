@@ -2,8 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general = "General", quicklinks = "Quicklinks", snippets = "Snippets", transformers = "Transformers"
-    case openWith = "Open With", clipboard = "Clipboard", chatgpt = "ChatGPT", sync = "Sync"
+    case general = "General", defaults = "Default Results", quicklinks = "Quicklinks", snippets = "Snippets"
+    case transformers = "Transformers", openWith = "Open With", clipboard = "Clipboard", chatgpt = "ChatGPT", sync = "Sync"
     var id: String { rawValue }
 
     var symbol: String {
@@ -12,6 +12,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .openWith: "arrow.up.forward.app"
         case .snippets: "text.insert"
         case .transformers: "wand.and.sparkles"
+        case .defaults: "pin"
         case .clipboard: "doc.on.clipboard"
         case .chatgpt: "sparkles"
         case .general: "gearshape"
@@ -25,6 +26,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .openWith: .orange
         case .snippets: .pink
         case .transformers: .purple
+        case .defaults: .red
         case .clipboard: .teal
         case .chatgpt: .indigo
         case .general: .gray
@@ -63,6 +65,7 @@ struct SettingsView: View {
                 case .openWith: OpenWithPage(settings: settings)
                 case .snippets: SnippetsPage(settings: settings)
                 case .transformers: TransformersPage(settings: settings, router: router)
+                case .defaults: DefaultResultsPage(settings: settings, launcher: launcher)
                 case .chatgpt: ChatGPTPage(settings: settings)
                 case .clipboard: ClipboardPage(settings: settings, store: store)
                 case .general: GeneralPage(settings: settings, launcher: launcher)
@@ -862,6 +865,203 @@ private struct OpenWithPage: View {
         newType = ""
         guard !type.isEmpty, !settings.values.excludedFileTypes.contains(type) else { return }
         settings.values.excludedFileTypes.append(type)
+    }
+}
+
+// MARK: - Default Results
+
+private struct DefaultResultsPage: View {
+    @ObservedObject var settings: SettingsStore
+    let launcher: LauncherModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Default Results", subtitle: "What the launcher shows before you type.")
+            List {
+                Section {
+                    SectionHeader(title: "Pinned", symbol: "pin.fill", tint: .red).plainRow()
+                    ForEach(settings.values.pinned, id: \.self) { id in
+                        PinnedRow(id: id, item: launcher.pinnedRow(id)) {
+                            withAnimation(Motion.standard) { settings.values.pinned.removeAll { $0 == id } }
+                        }
+                        .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                    .onMove { settings.values.pinned.move(fromOffsets: $0, toOffset: $1) }
+                    addMenu
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 2, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+
+                Section {
+                    SectionHeader(title: "Recent", symbol: "clock", tint: Theme.accent).plainRow()
+                    VStack(spacing: 0) {
+                        limitRow("When nothing matches",
+                                 detail: "No snippets or transformers fit the app, website, or folder you're in.",
+                                 value: $settings.values.recentLimit, range: 0...20)
+                        Divider().padding(.vertical, 10)
+                        limitRow("Below matching results",
+                                 detail: "Some do, so they come first and these follow.",
+                                 value: $settings.values.recentLimitWithMatches, range: 0...10)
+                    }
+                    .padding(12)
+                    .card()
+                    .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "lightbulb").foregroundStyle(.yellow)
+                Text("Results that fit where you are always come first, in full. Then your pins, in this order (drag to reorder), then what you use most. Press **⌘P** on a row in the launcher to pin or unpin it.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func limitRow(_ title: String, detail: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(value.wrappedValue == 0 ? "None" : "\(value.wrappedValue)")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Stepper("", value: value, in: range).labelsHidden()
+        }
+    }
+
+    private var addMenu: some View {
+        let pinned = Set(settings.values.pinned)
+        let links = settings.values.quicklinks.filter { !pinned.contains($0.id.uuidString) }
+        let snippets = settings.values.snippets.filter { $0.isGlobal && !pinned.contains("snippet:\($0.id)") }
+        let transformers = settings.values.transformers.filter { $0.isGlobal && !pinned.contains("transform:\($0.id)") }
+        let commands = LauncherModel.commands.filter { launcher.isPinnable($0) && !pinned.contains($0.id) }
+        return Menu {
+            Menu("Quicklink") {
+                ForEach(links) { l in Button(l.name) { pin(l.id.uuidString) } }
+            }
+            .disabled(links.isEmpty)
+            Menu("Snippet") {
+                ForEach(snippets) { sn in Button(sn.title) { pin("snippet:\(sn.id)") } }
+            }
+            .disabled(snippets.isEmpty)
+            Menu("Transformer") {
+                ForEach(transformers) { t in Button(t.name) { pin("transform:\(t.id)") } }
+            }
+            .disabled(transformers.isEmpty)
+            Menu("Portal") {
+                ForEach(commands) { c in Button(c.name) { pin(c.id) } }
+            }
+            .disabled(commands.isEmpty)
+            Divider()
+            Button("App…", action: addApps)
+        } label: {
+            Label(settings.values.pinned.isEmpty ? "Pin something to always show it first" : "Add…", systemImage: "plus")
+                .foregroundStyle(.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func pin(_ id: String) {
+        guard !settings.values.pinned.contains(id) else { return }
+        withAnimation(Motion.standard) { settings.values.pinned.append(id) }
+    }
+
+    private func addApps() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Pin"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { pin(url.standardizedFileURL.path) }
+    }
+}
+
+private struct PinnedRow: View {
+    let id: String
+    let item: LaunchItem?
+    let remove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            icon.frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).lineLimit(1).foregroundStyle(item == nil ? .secondary : .primary)
+                if let note {
+                    Label(note, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                } else if let subtitle = item?.subtitle, !subtitle.isEmpty {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 12)
+            if item?.kind == .transform { Pill(text: "With a Selection") }
+            Pill(text: kind)
+            Button(action: remove) { Image(systemName: "xmark.circle.fill") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .opacity(hovering ? 1 : 0)
+                .help("Unpin")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .card()
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .contextMenu { Button("Unpin", action: remove) }
+    }
+
+    private var isApp: Bool { id.hasPrefix("/") }
+
+    private var title: String {
+        if let item { return item.name }
+        return isApp ? SharedSettings.appName(id) : "Deleted"
+    }
+
+    private var note: String? {
+        guard item == nil else { return nil }
+        return isApp ? "Not installed on this Mac" : "No longer available everywhere"
+    }
+
+    private var kind: String {
+        if isApp { return "App" }
+        switch item?.kind {
+        case .quicklink: return "Quicklink"
+        case .snippet: return "Snippet"
+        case .transform: return "Transformer"
+        case .command: return "Portal"
+        default: return id.hasPrefix("snippet:") ? "Snippet" : id.hasPrefix("transform:") ? "Transformer" : "Quicklink"
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
+        if let id = item?.quicklinkID, let link = SettingsStore.shared.values.quicklinks.first(where: { $0.id == id }) {
+            QuicklinkIcon(link: link)
+        } else if let symbol = item?.symbol {
+            Image(systemName: symbol).foregroundStyle(Theme.accent).font(.body.weight(.medium))
+        } else if isApp {
+            Image(nsImage: IconCache.icon(forPath: id)).resizable().interpolation(.high)
+        } else {
+            Image(systemName: "questionmark.circle").foregroundStyle(.tertiary)
+        }
     }
 }
 

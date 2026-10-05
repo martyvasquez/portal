@@ -120,6 +120,17 @@ import AppKit
         let s = try JSONDecoder().decode(SharedSettings.self, from: Data(json.utf8))
         #expect(s.clipboardRetentionDays == 3)
         #expect(!s.quicklinks.isEmpty)
+        #expect(s.pinned.isEmpty && s.recentLimit == 8 && s.recentLimitWithMatches == 3)
+    }
+
+    @Test func onlyMatchingTransformersBecomesNoRecentsBelowMatches() throws {
+        let only = try JSONDecoder().decode(SharedSettings.self, from: Data(#"{"transformerListing":"onlyMatches"}"#.utf8))
+        #expect(only.recentLimitWithMatches == 0)
+        let first = try JSONDecoder().decode(SharedSettings.self, from: Data(#"{"transformerListing":"matchesFirst"}"#.utf8))
+        #expect(first.recentLimitWithMatches == 3)
+        let set = try JSONDecoder().decode(SharedSettings.self,
+                                           from: Data(#"{"transformerListing":"onlyMatches","recentLimitWithMatches":5}"#.utf8))
+        #expect(set.recentLimitWithMatches == 5)
     }
 }
 

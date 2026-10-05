@@ -65,21 +65,6 @@ struct TransformersPage: View {
                 }
             }
 
-            if settings.values.transformers.contains(where: { !$0.isGlobal }) {
-                HStack(spacing: 8) {
-                    Text("When some match the app or website you're in, show")
-                    Picker("", selection: $settings.values.transformerListing) {
-                        ForEach(TransformerListing.allCases) { Text($0.title).tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 28)
-                .padding(.top, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "lightbulb").foregroundStyle(.yellow)
                 Text("Select text in any app, then open the launcher: transformers come first, in this order (drag to reorder). Type **transform** and a prompt for a one-off, or press **⌘T** on a clip in clipboard history.")

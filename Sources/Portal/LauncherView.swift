@@ -21,9 +21,7 @@ struct LauncherView: View {
         } else if model.promptMode {
             promptHelp
         } else if model.results.isEmpty {
-            ContentUnavailableView(model.query.isEmpty ? "No Quicklinks Yet" : "No Matches",
-                                   systemImage: model.query.isEmpty ? "link" : "magnifyingglass",
-                                   description: Text(model.query.isEmpty ? "Add quicklinks in Settings." : ""))
+            ContentUnavailableView(model.query.isEmpty ? "Type to Search" : "No Matches", systemImage: "magnifyingglass")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             resultsList
@@ -141,6 +139,12 @@ struct LauncherView: View {
                                 model.selection = index
                                 model.perform(.primary)
                             }
+                            .contextMenu {
+                                if model.isPinnable(item) {
+                                    Button(model.isPinned(item) ? "Unpin" : "Pin") { model.togglePin(item) }
+                                        .keyboardShortcut("p")
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 8)
@@ -164,7 +168,7 @@ struct LauncherView: View {
         case .finder: return "Finder Selection"
         case .snippet, .folderAction: return "Snippets"
         case .quicklink: return "Quicklinks"
-        case .app: return model.query.isEmpty ? "Recent Apps" : "Apps"
+        case .app: return "Apps"
         case .command: return "Portal"
         }
     }

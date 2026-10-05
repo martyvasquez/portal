@@ -245,6 +245,8 @@ final class LauncherModel: ObservableObject {
     private let usage = UsageStore()
     private var apps: [LaunchItem] = []
     private var generation = 0
+    /// Row to keep selected through the next search, like one just pinned.
+    private var reselect: String?
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer?
 
@@ -273,6 +275,13 @@ final class LauncherModel: ObservableObject {
             .store(in: &cancellables)
         settings.$values
             .map(\.transformers)
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.search() }
+            .store(in: &cancellables)
+        settings.$values
+            .map { [$0.pinned, [String($0.recentLimit), String($0.recentLimitWithMatches)]] }
             .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -366,9 +375,10 @@ final class LauncherModel: ObservableObject {
         run?.cancel()
     }
 
-    /// Rows for the transformers, when there's selected text or a clip to work on.
-    private func makeTransformItems() -> [LaunchItem] {
-        guard let input = transformInput else { return [] }
+    /// Rows for the transformers, when there's selected text or a clip to work on: the ones that
+    /// match where you are (or every global one, when none do), and the global ones left over.
+    private func makeTransformItems() -> (matching: [LaunchItem], others: [LaunchItem]) {
+        guard let input = transformInput else { return ([], []) }
         let section = input.source == .clipboard ? "Transform Clip" : "Transform Selection"
         guard ai.isSignedIn else {
             var item = LaunchItem(id: "ai:signin", name: "Sign In with ChatGPT",
@@ -376,43 +386,43 @@ final class LauncherModel: ObservableObject {
                                   path: "", kind: .transform, symbol: "sparkles",
                                   keywords: "transform transformer ai chatgpt")
             item.section = section
-            return [item]
+            return ([item], [])
         }
         // Scopes apply to selections; a clip can be headed anywhere, so it gets every transformer.
-        var groups: [(section: String, transformers: [Transformer])]
+        var matching: [LaunchItem]
+        var others: [LaunchItem] = []
         if input.source == .clipboard {
-            groups = [(section, settings.values.transformers)]
+            matching = settings.values.transformers.map { transformRow($0, section: section) }
         } else {
             let all = settings.values.transformers
             let matches = all.filter { !$0.isGlobal && $0.applies(app: context.appID, url: context.url) }
             let global = all.filter { $0.isGlobal && $0.applies(app: context.appID, url: context.url) }
             if matches.isEmpty {
-                groups = [(section, global)]
-            } else if settings.values.transformerListing == .onlyMatches {
-                groups = [(matchSection(matches), matches)]
+                matching = global.map { transformRow($0, section: section) }
             } else {
-                groups = [(matchSection(matches), matches), ("Everywhere", global)]
-            }
-        }
-        var items = groups.flatMap { group in
-            group.transformers.map { t in
-                var item = LaunchItem(id: "transform:\(t.id)", name: t.name, subtitle: Self.promptSummary(t.prompt),
-                                      path: "", kind: .transform, symbol: "wand.and.sparkles",
-                                      keywords: "transform transformer ai")
-                item.transformerID = t.id
-                item.hotKey = t.hotKey?.display
-                item.badge = actionLabel(t.action)
-                item.section = group.section
-                return item
+                let title = matchSection(matches)
+                matching = matches.map { transformRow($0, section: title) }
+                others = global.map { transformRow($0, section: "Everywhere") }
             }
         }
         var custom = LaunchItem(id: "transform:custom", name: "Transform with Prompt…",
                                 subtitle: "Type what to do with the \(input.source == .clipboard ? "clip" : "selection")",
                                 path: "", kind: .transform, symbol: "text.bubble",
                                 keywords: "transformer ai prompt ask chatgpt custom")
-        custom.section = groups.last?.section ?? section
-        items.append(custom)
-        return items
+        custom.section = matching.last?.section ?? section
+        matching.append(custom)
+        return (matching, others)
+    }
+
+    private func transformRow(_ t: Transformer, section: String?) -> LaunchItem {
+        var item = LaunchItem(id: "transform:\(t.id)", name: t.name, subtitle: Self.promptSummary(t.prompt),
+                              path: "", kind: .transform, symbol: "wand.and.sparkles",
+                              keywords: "transform transformer ai")
+        item.transformerID = t.id
+        item.hotKey = t.hotKey?.display
+        item.badge = actionLabel(t.action)
+        item.section = section
+        return item
     }
 
     /// "transform make it shorter" runs "make it shorter" as a one-off prompt.
@@ -475,13 +485,7 @@ final class LauncherModel: ObservableObject {
 
     /// Rows for snippets: this folder's (.portal.json), this site's, this app's, then global.
     private func makeSnippetItems() -> (folder: [LaunchItem], site: [LaunchItem], app: [LaunchItem], global: [LaunchItem]) {
-        func row(_ id: String, _ name: String, _ text: String, section: String) -> LaunchItem {
-            var item = LaunchItem(id: id, name: name.isEmpty ? text : name, subtitle: name.isEmpty ? "" : text,
-                                  path: "", kind: .snippet, symbol: "text.insert", keywords: text)
-            item.snippetText = text
-            item.section = section
-            return item
-        }
+        func row(_ id: String, _ name: String, _ text: String, section: String) -> LaunchItem { Self.snippetRow(id, name, text, section: section) }
         var folder: [LaunchItem] = []
         if let root = context.root {
             let section = "Snippets · \(root.lastPathComponent)"
@@ -522,6 +526,14 @@ final class LauncherModel: ObservableObject {
             .map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets · \(appName)") }
         let global = all.filter(\.isGlobal).map { row("snippet:\($0.id)", $0.name, $0.text, section: "Snippets") }
         return (folder, site, app, global)
+    }
+
+    static func snippetRow(_ id: String, _ name: String, _ text: String, section: String?) -> LaunchItem {
+        var item = LaunchItem(id: id, name: name.isEmpty ? text : name, subtitle: name.isEmpty ? "" : text,
+                              path: "", kind: .snippet, symbol: "text.insert", keywords: text)
+        item.snippetText = text
+        item.section = section
+        return item
     }
 
     /// One row per app, in the order set in Settings → Open With: folder apps, then file apps.
@@ -568,18 +580,31 @@ final class LauncherModel: ObservableObject {
         let links = quicklinkItems
         let finder = makeFinderItems()
         let snippets = makeSnippetItems()
-        let snippetRows = snippets.folder + snippets.site + snippets.app + snippets.global
         let transforms = makeTransformItems()
         let inline = inlinePromptItem(query.trimmingCharacters(in: .whitespaces)).map { [$0] } ?? []
         let transformOnly = transformOnly
-        let items = transformOnly ? transforms : transforms + finder + snippetRows + Self.commands + links + apps
+        // What fits where you are: the selection's transformers, Finder's selection, this folder's,
+        // site's, and app's snippets. These always show in full; everything else earns its place.
+        let matching = transformOnly ? transforms.matching
+            : transforms.matching + finder + snippets.folder + snippets.site + snippets.app
+        let general = transformOnly ? [] : transforms.others + snippets.global + Self.commands + links + apps
+        let items = matching + general
         let usage = usage.entries
+        let shown = Set(matching.map(\.id))
+        let pins = transformOnly ? [] : pinnedRows().filter { !shown.contains($0.id) }
+        let skip = shown.union(pins.map(\.id)).union(["cmd:quit"])
+        let limit = max(0, matching.isEmpty ? settings.values.recentLimit : settings.values.recentLimitWithMatches)
+        let reselect = self.reselect
+        self.reselect = nil
         DispatchQueue.global(qos: .userInitiated).async {
             let ranked: [LaunchItem]
             if q.isEmpty {
-                // Transformers for the selection, quicklinks in the order you arranged them, then recently used apps.
-                ranked = transformOnly ? transforms
-                    : transforms + finder + snippetRows + links + Ranker.rank(query: [], items: items.filter { $0.kind == .app }, usage: usage, limit: 5)
+                let pool = general.filter { !skip.contains($0.id) }
+                var recent = Ranker.rank(query: [], items: pool, usage: usage, limit: limit)
+                // Until there's history, quicklinks fill the rest, in the order you arranged them.
+                let taken = Set(recent.map(\.id))
+                recent += pool.filter { $0.kind == .quicklink && !taken.contains($0.id) }.prefix(limit - recent.count)
+                ranked = matching + Self.sectioned(pins, "Pinned") + Self.sectioned(recent, "Recent")
             } else {
                 ranked = inline + Ranker.rank(query: q, items: items, usage: usage, limit: 60)
             }
@@ -587,10 +612,14 @@ final class LauncherModel: ObservableObject {
                 MainActor.assumeIsolated {
                     guard gen == self.generation else { return }
                     self.results = ranked
-                    self.selection = 0
+                    self.selection = reselect.flatMap { id in ranked.firstIndex { $0.id == id } } ?? 0
                 }
             }
         }
+    }
+
+    nonisolated private static func sectioned(_ items: [LaunchItem], _ section: String) -> [LaunchItem] {
+        items.map { var item = $0; item.section = section; return item }
     }
 
     var selectedItem: LaunchItem? {
@@ -666,6 +695,10 @@ final class LauncherModel: ObservableObject {
         let chars = e.charactersIgnoringModifiers ?? ""
         if flags == .control && (chars == "n" || chars == "j") { move(1); return true }
         if flags == .control && (chars == "p" || chars == "k") { move(-1); return true }
+        if flags == .command && chars == "p", let item = selectedItem, isPinnable(item) {
+            togglePin(item)
+            return true
+        }
         if flags == .command, let n = Int(chars), (1...9).contains(n), n <= results.count {
             selection = n - 1
             perform(.primary)
@@ -784,6 +817,62 @@ final class LauncherModel: ObservableObject {
             return [("↩", "Open"), ("⌘↩", "Show in Finder")]
         case .command:
             return [("↩", "Run")]
+        }
+    }
+}
+
+// MARK: - Pins
+
+extension LauncherModel {
+    /// Anything not tied to an app, site, folder, or selection can be pinned; those show up on their own.
+    func isPinnable(_ item: LaunchItem) -> Bool {
+        switch item.kind {
+        case .quicklink, .app: return true
+        case .command: return item.id != "cmd:quit"
+        case .snippet: return settings.values.snippets.contains { "snippet:\($0.id)" == item.id && $0.isGlobal }
+        case .transform: return settings.values.transformers.contains { $0.id == item.transformerID && $0.isGlobal }
+        case .finder, .folderAction: return false
+        }
+    }
+
+    func isPinned(_ item: LaunchItem) -> Bool { settings.values.pinned.contains(item.id) }
+
+    func togglePin(_ item: LaunchItem) {
+        reselect = item.id
+        if isPinned(item) {
+            settings.values.pinned.removeAll { $0 == item.id }
+            showNotice("Unpinned \(item.name)")
+        } else {
+            settings.values.pinned.append(item.id)
+            showNotice("Pinned \(item.name)")
+        }
+    }
+
+    /// The row a pinned id stands for, or nil once it's deleted, scoped, or (for an app) not on this Mac.
+    func pinnedRow(_ id: String) -> LaunchItem? {
+        if id.hasPrefix("cmd:") { return Self.commands.first { $0.id == id } }
+        if id.hasPrefix("snippet:") {
+            guard let s = settings.values.snippets.first(where: { "snippet:\($0.id)" == id && $0.isGlobal }) else { return nil }
+            return Self.snippetRow(id, s.name, s.text, section: nil)
+        }
+        if id.hasPrefix("transform:") {
+            guard let t = settings.values.transformers.first(where: { "transform:\($0.id)" == id && $0.isGlobal }) else { return nil }
+            return transformRow(t, section: nil)
+        }
+        if id.hasPrefix("/") {
+            guard FileManager.default.fileExists(atPath: id) else { return nil }
+            return LaunchItem(id: id, name: SharedSettings.appName(id), path: id, kind: .app)
+        }
+        return quicklinkItems.first { $0.id == id }
+    }
+
+    /// Pinned rows for the launcher right now. Transformers only show with a selection to work on.
+    fileprivate func pinnedRows() -> [LaunchItem] {
+        settings.values.pinned.compactMap(pinnedRow).filter { item in
+            guard item.kind == .transform else { return true }
+            guard transformInput != nil, ai.isSignedIn,
+                  let t = settings.values.transformers.first(where: { $0.id == item.transformerID }) else { return false }
+            return t.applies(app: context.appID, url: context.url)
         }
     }
 }

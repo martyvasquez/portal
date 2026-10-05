@@ -134,15 +134,20 @@ struct SharedSettings: Codable, Equatable {
     var transformers: [Transformer] = Transformer.starters
     /// What "Transform with Prompt" does with its result.
     var customPromptAction: TransformAction = .preview
-    /// How the launcher lists transformers when some match the app or site you're in.
-    var transformerListing: TransformerListing = .matchesFirst
+    /// Launcher rows shown before you type, in order, whatever the context: ids of quicklinks,
+    /// global snippets and transformers, apps, and commands.
+    var pinned: [String] = []
+    /// How many recently used rows the launcher shows before you type: when nothing matches
+    /// the app, site, folder, or selection, and below the rows that do.
+    var recentLimit = 8
+    var recentLimitWithMatches = 3
     /// nil = the newest Luna the account offers, at Low.
     var aiModel: String?
     var aiEffort: String?
 
     init() {}
 
-    private enum LegacyKeys: String, CodingKey { case finderSelectionAppPath }
+    private enum LegacyKeys: String, CodingKey { case finderSelectionAppPath, transformerListing }
 
     static func installed(_ paths: [String]) -> [String] {
         paths.filter { FileManager.default.fileExists(atPath: $0) }
@@ -192,7 +197,14 @@ struct SharedSettings: Codable, Equatable {
         ignoredBundleIDs = v(.ignoredBundleIDs, d.ignoredBundleIDs)
         transformers = v(.transformers, d.transformers)
         customPromptAction = v(.customPromptAction, d.customPromptAction)
-        transformerListing = v(.transformerListing, d.transformerListing)
+        pinned = v(.pinned, d.pinned)
+        recentLimit = v(.recentLimit, d.recentLimit)
+        recentLimitWithMatches = v(.recentLimitWithMatches, d.recentLimitWithMatches)
+        // "Only matches" for transformers became showing nothing extra below matching rows.
+        if !c.contains(.recentLimitWithMatches),
+           (try? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(String.self, forKey: .transformerListing)) == "onlyMatches" {
+            recentLimitWithMatches = 0
+        }
         aiModel = v(.aiModel, d.aiModel)
         aiEffort = v(.aiEffort, d.aiEffort)
     }
