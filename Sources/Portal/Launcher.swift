@@ -443,7 +443,9 @@ final class LauncherModel: ObservableObject {
     /// "8*8" answers 64 at the top of the results.
     private func calculatorItem(_ query: String) -> LaunchItem? {
         guard settings.values.calculator, let answer = Calculator.evaluate(query) else { return nil }
-        var item = LaunchItem(id: "calculator", name: answer.display, subtitle: query.trimmingCharacters(in: .whitespaces),
+        let expression = query.trimmingCharacters(in: .whitespaces)
+        // Rows compare by id, so the id carries the expression or the list keeps the old answer.
+        var item = LaunchItem(id: "calculator:\(expression)", name: answer.display, subtitle: expression,
                               path: "", kind: .calculator, symbol: "equal")
         item.snippetText = answer.plain
         item.section = "Calculator"
