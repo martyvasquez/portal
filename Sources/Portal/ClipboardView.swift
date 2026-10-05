@@ -300,7 +300,7 @@ private struct ClipRow: View {
                     .font(clip.isSecret ? .body.monospaced() : .body)
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    Text(clip.created, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
+                    ClipAge(date: clip.created)
                     if !isMine { Text("· \(clip.payload.machineName)") }
                 }
                 .font(.caption)
@@ -421,5 +421,23 @@ extension Clip {
         guard !isSecret, payload.kind == .text || payload.kind == .url,
               let text = payload.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return text
+    }
+}
+
+/// How long ago a clip was copied: "Just now" for the first minute, then "5 min. ago", kept current while shown.
+struct ClipAge: View {
+    let date: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: date, by: 60)) { context in
+            Text(Self.label(date, now: context.date))
+        }
+    }
+
+    static func label(_ date: Date, now: Date) -> String {
+        if now.timeIntervalSince(date) < 60 { return "Just now" }
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f.localizedString(for: date, relativeTo: now)
     }
 }
