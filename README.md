@@ -326,7 +326,7 @@ minute. **Check for Updates…** is in the menu bar menu, and in the launcher.
 **Requirements**
 - **macOS 26** or later.
 - **Full Xcode**, not just the Command Line Tools. On the macOS 27 SDK, SwiftUI's `@State` is a macro whose plugin only ships with Xcode.
-- An **Apple Development** signing certificate. A free **Personal Team** is enough; no paid developer account needed. In Xcode → Settings → Accounts, add any Apple ID, select its Personal Team, click **Manage Certificates…**, and add an **Apple Development** certificate. `scripts/build.sh` finds it on its own. Without one the app is signed ad hoc, and macOS forgets Portal's permissions on every rebuild.
+- An **Apple Development** signing certificate. A free **Personal Team** is enough; no paid developer account needed. In Xcode → Settings → Accounts, add any Apple ID, select its Personal Team, click **Manage Certificates…**, and add an **Apple Development** certificate. `scripts/build.sh` finds it on its own (it prefers a **Developer ID Application** certificate if you have one, and signs those with the hardened runtime). Without one the app is signed ad hoc, and macOS forgets Portal's permissions on every rebuild.
 
 ```sh
 git clone https://github.com/martyvasquez/portal.git
@@ -391,12 +391,14 @@ swift scripts/make-icon.swift .  # rebuild Resources/AppIcon.icns from Resources
 Set `SIGN_IDENTITY="Apple Development: …"` to choose a certificate when you have more than one.
 
 **Releases.** Every push to `main` that changes the app runs `.github/workflows/release.yml`: tests, a
-universal build signed with the release certificate, a Sparkle-signed `Portal.zip`, and a GitHub
+universal build signed with the release certificate (Developer ID, hardened runtime), a Sparkle-signed `Portal.zip`, and a GitHub
 release with its `appcast.xml`. Installed copies read
 `releases/latest/download/appcast.xml`. Build numbers are UTC timestamps (`202610051558`), locally and in
 CI. Don't change the feed URL, the Sparkle public key, the bundle ID, or the signing certificate: installed
-copies depend on them. The workflow needs three secrets: `SPARKLE_PRIVATE_KEY` (its backup is in the
-login keychain under `com.martyvasquez.portal`), and `SIGNING_CERT_P12` / `SIGNING_CERT_PASSWORD`.
+copies depend on them (renewing the Developer ID certificate is fine: macOS checks the team ID). The
+workflow needs four secrets: `SPARKLE_PRIVATE_KEY` (its backup is in the login keychain under
+`com.martyvasquez.portal`), `SIGNING_CERT_P12` / `SIGNING_CERT_PASSWORD` (the certificate's private key),
+and `SIGNING_CERT_CER` (the certificate). The workflow adds Apple's Developer ID intermediates itself.
 
 To change the app icon, replace `Resources/icon-source.png` (any size, on a transparent or black
 background), run the icon script, then `scripts/build.sh --install`. The script trims the background,
@@ -434,7 +436,8 @@ certificate with your Apple ID's Personal Team (Xcode → Settings → Accounts 
 rebuild; macOS ties permissions to the signature.
 
 **Do I need a paid Apple Developer account?** No. A free Personal Team certificate signs Portal for your
-own Macs. Portal isn't notarized, so it's meant to be built from source rather than shared as a download.
+own Macs. Releases are signed with a Developer ID but not yet notarized, so a first download from GitHub
+gets a macOS warning; building from source avoids it.
 
 **⌘Space doesn't open Portal.** Something else holds it, usually Spotlight. Settings → General shows
 what's in the way; Portal also retries hotkeys another app was holding.
