@@ -1323,6 +1323,13 @@ private struct GeneralPage: View {
                 }
 
                 Section {
+                    Toggle("Calculator", isOn: $settings.values.calculator)
+                } footer: {
+                    Text("Type math like 8*8 or 200 + 15% in the launcher. ↩ pastes the answer and leaves it on the clipboard.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
                     Toggle("Show Portal in the menu bar", isOn: $settings.values.showMenuBarIcon)
                     Toggle("Open Portal at login", isOn: $launchAtLogin)
                         .onChange(of: launchAtLogin) { _, on in

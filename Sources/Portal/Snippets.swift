@@ -289,14 +289,14 @@ enum CommandDetector {
 
 @MainActor
 enum SnippetPaster {
-    /// Pastes `text` into the front app via the clipboard, then puts the clipboard back.
-    /// Both writes carry Portal's marker so clipboard history ignores them.
-    static func paste(_ text: String) {
+    /// Pastes `text` into the front app via the clipboard, then puts the clipboard back (unless
+    /// `keepOnClipboard`). Both writes carry Portal's marker so clipboard history ignores them.
+    static func paste(_ text: String, keepOnClipboard: Bool = false) {
         let pb = NSPasteboard.general
-        let saved = PasteboardSnapshot(pb)
+        let saved = keepOnClipboard ? nil : PasteboardSnapshot(pb)
         pb.clearContents()
         pb.setString(text, forType: .string)
-        pb.setData(Data(), forType: .portalMarker)
+        if !keepOnClipboard { pb.setData(Data(), forType: .portalMarker) }
 
         guard Permissions.accessibilityGranted else {
             Permissions.requestAccessibility()
@@ -304,7 +304,7 @@ enum SnippetPaster {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             Paster.sendPaste()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { saved.restore(pb) }
+            if let saved { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { saved.restore(pb) } }
         }
     }
 

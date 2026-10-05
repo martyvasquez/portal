@@ -164,6 +164,7 @@ struct LauncherView: View {
     private func header(for item: LaunchItem) -> String {
         if let section = item.section { return section }
         switch item.kind {
+        case .calculator: return "Calculator"
         case .transform: return "Transform Selection"
         case .finder: return "Finder Selection"
         case .snippet, .folderAction: return "Snippets"
@@ -199,7 +200,9 @@ private struct LaunchRow: View {
         HStack(spacing: 10) {
             icon.frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.name).lineLimit(1)
+                Text(item.name)
+                    .font(item.kind == .calculator ? .title3.weight(.semibold).monospacedDigit() : nil)
+                    .lineLimit(1)
                 if !item.subtitle.isEmpty {
                     Text(item.subtitle)
                         .font(.caption)

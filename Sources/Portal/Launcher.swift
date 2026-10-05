@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-enum LaunchKind: Sendable { case transform, finder, snippet, folderAction, quicklink, app, command }
+enum LaunchKind: Sendable { case calculator, transform, finder, snippet, folderAction, quicklink, app, command }
 
 struct LaunchItem: Identifiable, Hashable, Sendable {
     let id: String          // quicklink UUID, app path, or "cmd:<name>"
@@ -440,6 +440,16 @@ final class LauncherModel: ObservableObject {
         return item
     }
 
+    /// "8*8" answers 64 at the top of the results.
+    private func calculatorItem(_ query: String) -> LaunchItem? {
+        guard settings.values.calculator, let answer = Calculator.evaluate(query) else { return nil }
+        var item = LaunchItem(id: "calculator", name: answer.display, subtitle: query.trimmingCharacters(in: .whitespaces),
+                              path: "", kind: .calculator, symbol: "equal")
+        item.snippetText = answer.plain
+        item.section = "Calculator"
+        return item
+    }
+
     /// "For mail.google.com" or "For Mail": where the matching transformers apply.
     private func matchSection(_ matches: [Transformer]) -> String {
         if let url = context.url, matches.contains(where: { t in t.sites.contains { SiteMatcher.matches($0, url) } }) {
@@ -581,8 +591,9 @@ final class LauncherModel: ObservableObject {
         let finder = makeFinderItems()
         let snippets = makeSnippetItems()
         let transforms = makeTransformItems()
-        let inline = inlinePromptItem(query.trimmingCharacters(in: .whitespaces)).map { [$0] } ?? []
         let transformOnly = transformOnly
+        let inline = (transformOnly ? [] : calculatorItem(query).map { [$0] } ?? [])
+            + (inlinePromptItem(query.trimmingCharacters(in: .whitespaces)).map { [$0] } ?? [])
         // What fits where you are: the selection's transformers, Finder's selection, this folder's,
         // site's, and app's snippets. These always show in full; everything else earns its place.
         let matching = transformOnly ? transforms.matching
@@ -715,6 +726,15 @@ final class LauncherModel: ObservableObject {
     func perform(_ action: LaunchAction, item: LaunchItem? = nil) {
         guard let item = item ?? selectedItem else { return }
         switch item.kind {
+        case .calculator:
+            guard let text = item.snippetText else { return }
+            onDismiss()
+            // The answer stays on the clipboard, and goes into the app too where pasting makes sense.
+            if action == .copy || context.appID == "com.apple.finder" {
+                SnippetPaster.copy(text)
+            } else {
+                SnippetPaster.paste(text, keepOnClipboard: true)
+            }
         case .transform:
             let chosen: TransformAction? = action == .copy ? .copy : action == .alternate ? .preview : nil
             switch item.id {
@@ -800,7 +820,7 @@ final class LauncherModel: ObservableObject {
                 if own != .copy { hints.append(("⌥↩", "Copy")) }
                 return hints
             }
-        case .snippet:
+        case .snippet, .calculator:
             return context.appID == "com.apple.finder" ? [("↩", "Copy")] : [("↩", "Paste"), ("⌥↩", "Copy")]
         case .folderAction:
             return [("↩", item.id == "folder:seed" ? "Scan Repo" : "Open File")]
@@ -831,7 +851,7 @@ extension LauncherModel {
         case .command: return item.id != "cmd:quit"
         case .snippet: return settings.values.snippets.contains { "snippet:\($0.id)" == item.id && $0.isGlobal }
         case .transform: return settings.values.transformers.contains { $0.id == item.transformerID && $0.isGlobal }
-        case .finder, .folderAction: return false
+        case .finder, .folderAction, .calculator: return false
         }
     }
 

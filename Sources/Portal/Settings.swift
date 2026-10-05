@@ -107,6 +107,8 @@ struct SharedSettings: Codable, Equatable {
                   appPath: "/Applications/Google Chrome.app"),
     ]
     var includeApps = true
+    /// Typing math like 8*8 in the launcher shows the answer.
+    var calculator = true
     var showMenuBarIcon = true
     /// Apps offered for what's selected in Finder, in order; the first is the default.
     var folderOpenWith: [String] = SharedSettings.installed([
@@ -175,6 +177,7 @@ struct SharedSettings: Codable, Equatable {
         snippets = v(.snippets, d.snippets)
         quicklinks = v(.quicklinks, d.quicklinks)
         includeApps = v(.includeApps, d.includeApps)
+        calculator = v(.calculator, d.calculator)
         showMenuBarIcon = v(.showMenuBarIcon, d.showMenuBarIcon)
         folderOpenWith = v(.folderOpenWith, d.folderOpenWith)
         fileOpenWith = v(.fileOpenWith, d.fileOpenWith)

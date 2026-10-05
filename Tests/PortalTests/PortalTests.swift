@@ -472,3 +472,45 @@ import AppKit
         #expect((json["input"] as? [[String: String]])?.first?["content"] == "Polish x")
     }
 }
+
+@Suite struct CalculatorTests {
+    private func calc(_ s: String) -> String? { Calculator.evaluate(s)?.plain }
+
+    @Test func basics() {
+        #expect(calc("8*8") == "64")
+        #expect(calc("10/2") == "5")
+        #expect(calc("10/4") == "2.5")
+        #expect(calc("2 + 3 * 4") == "14")
+        #expect(calc("(2+3)*4") == "20")
+        #expect(calc("2^3^2") == "512")
+        #expect(calc("-2^2") == "-4")
+        #expect(calc("3 × 4 ÷ 2 − 1") == "5")
+        #expect(calc("8x8") == "64")
+        #expect(calc("2(3+4)") == "14")
+    }
+
+    @Test func unfinishedInputShowsSoFar() {
+        #expect(calc("4+4+5+") == "13")
+        #expect(calc("(2+3") == "5")
+        #expect(calc("8*(") == nil)   // just "8"
+    }
+
+    @Test func percent() {
+        #expect(calc("200 + 15%") == "230")
+        #expect(calc("200 - 10%") == "180")
+        #expect(calc("50% * 80") == "40")
+    }
+
+    @Test func formatting() {
+        #expect(calc("0.1+0.2") == "0.3")
+        #expect(calc("1,000 * 2") == "2000")
+        #expect(Calculator.evaluate("1000*1000")?.display == "1,000,000")
+        #expect(calc("1/3") == "0.333333333333")
+    }
+
+    @Test func notMath() {
+        for s in ["", "8", "-5", "(5)", "safari", "xcode", "x264", "10/0", "1,2+3", "4++", "transform 2+2"] {
+            #expect(calc(s) == nil, "\(s)")
+        }
+    }
+}
