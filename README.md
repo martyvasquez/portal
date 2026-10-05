@@ -26,7 +26,7 @@
 Portal is a menu bar app written in Swift and SwiftUI, with no third-party dependencies. It was
 built to replace Raycast with something smaller that does a handful of things well:
 
-- **⌘Space** opens the **launcher**: snippets for the folder, site, or app you're in, quicklinks, apps, a calculator, and AI transformers for the text you've selected.
+- **⌘Space** opens the **launcher**: snippets for the folder you're in, quicklinks and snippets for the site or app you're in, apps, a calculator, and AI transformers for the text you've selected.
 - **⇧⌘V** opens **clipboard history**, end-to-end encrypted and shared between your Macs through iCloud Drive.
 
 Everything is configured in a real Settings window, stored as plain JSON, and synced without an account or a server.
@@ -55,7 +55,7 @@ Everything is configured in a real Settings window, stored as plain JSON, and sy
 | | |
 |---|---|
 | **Context-aware snippets** | Different snippets for each repo (from a `.portal.json` that travels with git), each website, and each app. Portal reads the folder from Ghostty or Terminal and the page from your browser. |
-| **Quicklinks with hotkeys** | Folders and URLs that open in the app you choose (Ghostty, Chrome, Sublime Text…), each with an optional global hotkey. `{query}` links ask for text first. |
+| **Quicklinks with hotkeys** | Folders and URLs that open in the app you choose (Ghostty, Chrome, Sublime Text…), each with an optional hotkey. Show them everywhere or only on certain sites and apps. `{query}` links ask for text first. |
 | **AI transformers** | Select text anywhere, open the launcher, pick "Polish" or "Summarize". Runs on your ChatGPT Plus/Pro plan; no API key. |
 | **Encrypted, synced clipboard** | AES-256-GCM per clip, a passphrase that never leaves your Macs, and sync through iCloud Drive with no merge conflicts. |
 | **Secrets handled properly** | API keys, tokens, and password manager copies are detected, masked, and expire sooner. |
@@ -239,7 +239,8 @@ is selected; Portal recognizes that and doesn't offer transformers.
 ### Default results: pinned and recent
 
 **Settings → Default Results** controls what the launcher shows before you type. Press `⌘P` on any
-quicklink, app, global snippet, or command to pin it, and drag pins into order. Below the pins, the
+global quicklink, snippet, or transformer, app, or command to pin it (scoped ones already show where
+they apply), and drag pins into order. Below the pins, the
 launcher shows your most-used rows: 8 when nothing matches where you are, 3 below rows that do (both adjustable).
 
 <p align="center">
