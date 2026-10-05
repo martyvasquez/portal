@@ -14,6 +14,7 @@
   <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple">
   <img alt="Swift" src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white">
   <img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-4c1">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
@@ -47,6 +48,7 @@ Everything is configured in a real Settings window, stored as plain JSON, and sy
 - [Settings reference](#settings-reference)
 - [Development](#development)
 - [FAQ](#faq)
+- [License](#license)
 
 ## Highlights
 
@@ -414,3 +416,8 @@ Sign in with ChatGPT.
 
 **Can I use Portal without iCloud Drive?** Yes. With sync off, everything stays in
 `~/Library/Application Support/Portal`, and clips are encrypted with a per-Mac key.
+
+## License
+
+Portal is released under the [MIT License](LICENSE). Use it, fork it, and change it however you like;
+keep the copyright notice with the code.
