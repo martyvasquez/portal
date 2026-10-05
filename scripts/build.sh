@@ -6,8 +6,9 @@
 #
 # Signing with a stable certificate matters: macOS ties Accessibility and other
 # permissions to the signature, so an ad-hoc signature would reset them every build
-# (and every update). Local builds and CI both sign with the same Personal Team
-# certificate. Override with: SIGN_IDENTITY="Apple Development: …" scripts/build.sh
+# (and every update). Local builds and CI both sign with the same Developer ID
+# certificate, with the hardened runtime so builds can be notarized.
+# Override with: SIGN_IDENTITY="Apple Development: …" scripts/build.sh
 #
 # Installed copies update themselves from GitHub Releases with Sparkle (see
 # .github/workflows/release.yml). Build numbers are timestamps, so they always go up,
@@ -19,14 +20,16 @@ APP_NAME="Portal"
 BUNDLE_ID="com.martyvasquez.portal"
 VERSION="0.1.0"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
-# Releases are signed with "Apple Development: martybvasquez@gmail.com (P99ZL6D5X6)", picked by
-# hash because an expired copy shares its name. Anyone else's build uses their own certificate.
-RELEASE_IDENTITY="86CE96F7F5495D3885FF5C31C809D1555D5E7378"
+# Releases are signed with "Developer ID Application: Marty Vasquez (G88C7HMHUJ)", picked by
+# hash so a renewed or expired copy with the same name can't be chosen by accident.
+# Anyone else's build uses their own Developer ID, else their Apple Development certificate.
+RELEASE_IDENTITY="A5214E95171D52F564BB0644CEEDB997F0E3610A"
 IDENTITIES="$(security find-identity -v -p codesigning)"
 if [[ "$IDENTITIES" == *"$RELEASE_IDENTITY"* ]]; then
     DEFAULT_IDENTITY="$RELEASE_IDENTITY"
 else
-    DEFAULT_IDENTITY="$(awk -F'"' '/Apple Development/ {print $2; exit}' <<< "$IDENTITIES")"
+    DEFAULT_IDENTITY="$(awk -F'"' '/Developer ID Application/ {print $2; exit}' <<< "$IDENTITIES")"
+    [[ -n "$DEFAULT_IDENTITY" ]] || DEFAULT_IDENTITY="$(awk -F'"' '/Apple Development/ {print $2; exit}' <<< "$IDENTITIES")"
 fi
 IDENTITY="${SIGN_IDENTITY-$DEFAULT_IDENTITY}"
 FEED_URL="https://github.com/martyvasquez/portal/releases/latest/download/appcast.xml"
@@ -73,15 +76,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Sparkle's helpers first, inside out, then the app.
-sign() { codesign --force --timestamp=none --sign "${IDENTITY:--}" "$@"; }
+# Sparkle's helpers first, inside out, then the app. Developer ID builds get the hardened
+# runtime and a secure timestamp, which notarization requires.
+if [[ "$IDENTITY" == "$RELEASE_IDENTITY" || "$IDENTITY" == *"Developer ID"* ]]; then
+    sign() { codesign --force --options runtime --timestamp --sign "$IDENTITY" "$@"; }
+else
+    sign() { codesign --force --timestamp=none --sign "${IDENTITY:--}" "$@"; }
+fi
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 sign "$SPARKLE/XPCServices/Installer.xpc"
 sign --preserve-metadata=entitlements "$SPARKLE/XPCServices/Downloader.xpc"
 sign "$SPARKLE/Autoupdate"
 sign "$SPARKLE/Updater.app"
 sign "$APP/Contents/Frameworks/Sparkle.framework"
-sign --identifier "$BUNDLE_ID" "$APP"
+sign --identifier "$BUNDLE_ID" --entitlements Resources/Portal.entitlements "$APP"
 if [[ -n "$IDENTITY" ]]; then
     echo "Signed with: $IDENTITY"
 else

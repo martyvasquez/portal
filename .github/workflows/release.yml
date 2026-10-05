@@ -1,7 +1,7 @@
 # Publishes Portal on every push to main that changes the app. Installed copies check
 # this repo's latest release (at launch, every few hours, and on wake) and update themselves.
-# Same setup as baseball-simulator's release-mac.yml, except Portal is signed with the
-# Personal Team certificate instead of ad hoc, so Accessibility survives updates.
+# Same setup as baseball-simulator's release-mac.yml, except Portal is signed with its
+# Developer ID certificate instead of ad hoc, so Accessibility survives updates.
 name: Release
 
 on:
@@ -47,7 +47,7 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Apple Development/ {print $2; exit}')"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ {print $2; exit}')"
           [[ -n "$IDENTITY" ]] || { echo "no signing identity in SIGNING_CERT_P12"; exit 1; }
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
