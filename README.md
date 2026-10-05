@@ -311,7 +311,7 @@ Portal is built from source for now.
 **Requirements**
 - **macOS 26** or later on Apple silicon.
 - **Full Xcode**, not just the Command Line Tools. On the macOS 27 SDK, SwiftUI's `@State` is a macro whose plugin only ships with Xcode.
-- An **Apple Development** signing certificate. Signing in to Xcode → Settings → Accounts creates one for free. Without it the app is signed ad hoc, and macOS forgets Portal's permissions on every rebuild.
+- An **Apple Development** signing certificate. A free **Personal Team** is enough; no paid developer account needed. In Xcode → Settings → Accounts, add any Apple ID, select its Personal Team, click **Manage Certificates…**, and add an **Apple Development** certificate. `scripts/build.sh` finds it on its own. Without one the app is signed ad hoc, and macOS forgets Portal's permissions on every rebuild.
 
 ```sh
 git clone https://github.com/martyvasquez/portal.git
@@ -405,8 +405,12 @@ with its whole configuration in one readable JSON file.
 
 **Does it work on Intel Macs?** The build script targets `arm64`. Change `--arch` in `scripts/build.sh` if you want to try.
 
-**Portal lost its permissions after I rebuilt it.** It was signed ad hoc. Create an Apple Development
-certificate (Xcode → Settings → Accounts) and rebuild; macOS ties permissions to the signature.
+**Portal lost its permissions after I rebuilt it.** It was signed ad hoc. Create a free Apple Development
+certificate with your Apple ID's Personal Team (Xcode → Settings → Accounts → Manage Certificates…) and
+rebuild; macOS ties permissions to the signature.
+
+**Do I need a paid Apple Developer account?** No. A free Personal Team certificate signs Portal for your
+own Macs. Portal isn't notarized, so it's meant to be built from source rather than shared as a download.
 
 **⌘Space doesn't open Portal.** Something else holds it, usually Spotlight. Settings → General shows
 what's in the way; Portal also retries hotkeys another app was holding.
