@@ -35,6 +35,7 @@ jobs:
       - name: Import signing certificate
         env:
           CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_CER: ${{ secrets.SIGNING_CERT_CER }}
           CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
@@ -44,7 +45,10 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          # The .p12 holds only the certificate and key; Developer ID needs Apple's intermediates to be valid.
+          # The .p12 holds the private key; the certificate comes separately (SIGNING_CERT_CER),
+          # and Developer ID needs Apple's intermediates to be valid. The keychain pairs them up.
+          echo "$CERT_CER" | base64 --decode > "$RUNNER_TEMP/cert.cer"
+          security import "$RUNNER_TEMP/cert.cer" -k "$KEYCHAIN"
           for ca in DeveloperIDCA DeveloperIDG2CA; do
             curl -fsSL "https://www.apple.com/certificateauthority/$ca.cer" -o "$RUNNER_TEMP/$ca.cer"
             security import "$RUNNER_TEMP/$ca.cer" -k "$KEYCHAIN"
