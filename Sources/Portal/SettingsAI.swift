@@ -67,7 +67,7 @@ struct TransformersPage: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "lightbulb").foregroundStyle(.yellow)
-                Text("Select text in any app, then open the launcher: transformers come first, in this order (drag to reorder). Type **transform** and a prompt for a one-off, or press **⌘T** on a clip in clipboard history.")
+                Text("Select text in any app, then open the launcher: transformers come first, in this order (drag to reorder). Type **transform** and a prompt for a one-off, or press **⌘A** on a clip in clipboard history.")
             }
             .font(.caption)
             .foregroundStyle(.secondary)

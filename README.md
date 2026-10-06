@@ -185,7 +185,7 @@ Turn it off in Settings → General → Calculator.
 ChatGPT. Select text in any app and open the launcher: your transformers come first.
 
 <p align="center">
-  <img src="docs/images/transformers.png" width="49%" alt="The launcher offering Polish, Summarize, Clean Up JSON, and Convert to Markdown for selected text">
+  <img src="docs/images/transformers.png" width="49%" alt="The launcher offering the Polish, Summarize, and Clean Up JSON AI transformers for selected text">
   <img src="docs/images/transform-preview.png" width="49%" alt="The Polish transformer's result shown above the original selection">
 </p>
 
@@ -223,7 +223,7 @@ like `Format this for an email with a bulleted summary`. To only change formatti
 - **Model**: the newest model your ChatGPT account offers, at low thinking so it's quick. Change it in Settings → ChatGPT, or per transformer.
 
 <p align="center">
-  <img src="docs/images/settings-transformers.png" width="80%" alt="Transformers settings listing each transformer with its scope, action, and hotkey">
+  <img src="docs/images/settings-transformers.png" width="80%" alt="AI Transformers settings listing each transformer with its scope, paste format, action, and hotkey">
 </p>
 
 **Signing in.** AI transformers run on your **ChatGPT Plus or Pro** plan through *Sign in with ChatGPT*, so
@@ -270,7 +270,7 @@ Press **⇧⌘V**. Portal keeps text, links, images, and files for 7 days by def
 and which Mac each clip came from.
 
 <p align="center">
-  <img src="docs/images/clipboard.png" width="80%" alt="Clipboard history with text, links, a file, an image, a terminal command, and a masked secret">
+  <img src="docs/images/clipboard.png" width="80%" alt="Clipboard history with a formatted email from Notes selected, offering to paste it as Markdown or plain text">
 </p>
 
 - **Secrets**: copies from password managers, plus anything that looks like an API key, token, or private key (OpenAI, Stripe, GitHub, AWS, Slack, Google, JWTs, PEM keys, …). They're masked in the list, can expire sooner, and are marked so other clipboard tools skip them.

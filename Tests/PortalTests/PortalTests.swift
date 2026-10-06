@@ -755,6 +755,9 @@ import AppKit
         #expect(gmail.formatName == "Formatted")
 
         #expect(!clip("## Key", secret: true).offers(.formatted))
+        // Indented lines from a terminal aren't Markdown; backtick code is.
+        #expect(!clip("Run the migration first:\n\n    pnpm db:migrate").offers(.formatted))
+        #expect(clip("Run `pnpm db:migrate` first").offers(.formatted))
     }
 
     @Test func oldTransformersAndClipsStillDecode() throws {

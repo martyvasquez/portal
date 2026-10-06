@@ -73,7 +73,7 @@ enum RichText {
         guard let body = renderHTML(markdown),
               // Raw HTML in the text is dropped from the rendering; the plain text is better than losing it.
               !body.contains("<!-- raw HTML omitted -->"),
-              hasFormatting(body) else { return nil }
+              hasFormatting(body, backticks: markdown.contains("`") || markdown.contains("~~~")) else { return nil }
         return body
     }
 
@@ -187,8 +187,11 @@ enum RichText {
         return String(cString: html)
     }
 
-    /// True when the HTML has any tag besides paragraphs and line breaks.
-    nonisolated private static func hasFormatting(_ html: String) -> Bool {
-        html.matches(of: #/<\/?([a-zA-Z][a-zA-Z0-9]*)/#).contains { !["p", "br"].contains($0.1.lowercased()) }
+    /// True when the HTML has any tag besides paragraphs and line breaks. Code counts only when the
+    /// text marked it with backticks or a fence: indented lines alone (terminal output, pasted code)
+    /// aren't Markdown.
+    nonisolated private static func hasFormatting(_ html: String, backticks: Bool) -> Bool {
+        let plain: Set<String> = backticks ? ["p", "br"] : ["p", "br", "pre", "code"]
+        return html.matches(of: #/<\/?([a-zA-Z][a-zA-Z0-9]*)/#).contains { !plain.contains($0.1.lowercased()) }
     }
 }

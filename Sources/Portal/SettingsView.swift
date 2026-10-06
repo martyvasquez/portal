@@ -1391,7 +1391,7 @@ private struct ClipboardPage: View {
                 } header: {
                     Text("Pasting")
                 } footer: {
-                    Text("⌘Return does the other one. Pinned clips (⌘P) never expire.").font(.caption).foregroundStyle(.secondary)
+                    Text("⌘Return does the other one. ⌘F, ⌘M, and ⌘P paste a clip formatted, as Markdown, or as plain text.").font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section {
