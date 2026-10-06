@@ -71,11 +71,13 @@ import AppKit
     @Test func fileNameRoundTrip() throws {
         let id = UUID()
         let date = Date(timeIntervalSince1970: 1_790_000_000.123)
-        let name = ClipFileName.make(created: date, id: id, pinned: true, secret: true)
+        let name = ClipFileName.make(created: date, id: id, secret: true)
         let parsed = try #require(ClipFileName.parse(name))
-        #expect(parsed.id == id && parsed.pinned && parsed.secret)
+        #expect(parsed.id == id && parsed.secret)
         #expect(abs(parsed.created.timeIntervalSince(date)) < 0.002)
-        #expect(ClipFileName.parse(ClipFileName.make(created: date, id: id, pinned: false, secret: false))?.pinned == false)
+        #expect(ClipFileName.parse(ClipFileName.make(created: date, id: id, secret: false))?.secret == false)
+        // Clips pinned by older versions still read.
+        #expect(ClipFileName.parse("1790000000123_\(id.uuidString)_ps.clip")?.secret == true)
         #expect(ClipFileName.parse("settings.json") == nil)
     }
 
@@ -596,5 +598,174 @@ import AppKit
         let now = Date()
         let label = ClipAge.label(now.addingTimeInterval(-5 * 60), now: now)
         #expect(label.contains("5") && label.contains("ago"))
+    }
+}
+
+@Suite struct RichTextTests {
+    @Test func plainTextHasNoHTML() {
+        #expect(RichText.html(fromMarkdown: "Hi Sam,\n\nThanks for the notes.\n\nMarty") == nil)
+        #expect(RichText.html(fromMarkdown: "{\n  \"a\": 1\n}") == nil)
+    }
+
+    @Test func markdownBecomesHTML() throws {
+        let html = try #require(RichText.html(fromMarkdown: "## Next steps\n\n- **Ship** it\n- Read [the docs](https://example.com)"))
+        #expect(html.hasPrefix("<meta charset=\"utf-8\">"))
+        #expect(html.contains("<h2>Next steps</h2>"))
+        #expect(html.contains("<li><strong>Ship</strong> it</li>"))
+        #expect(html.contains("<a href=\"https://example.com\">the docs</a>"))
+    }
+
+    @Test func keepsLineBreaksAndTables() throws {
+        let html = try #require(RichText.html(fromMarkdown: "**Thanks,**\nMarty\n\n| A | B |\n|---|---|\n| 1 | 2 |"))
+        #expect(html.contains("<strong>Thanks,</strong><br />"))
+        #expect(html.contains("<table>"))
+    }
+
+    @Test func rawHTMLFallsBackToText() {
+        #expect(RichText.html(fromMarkdown: "Use **bold** or <div>a div</div>") == nil)
+    }
+}
+
+@Suite struct MarkdownBlockTests {
+    @Test func listItemsGetMarkersAndKeepLineBreaks() {
+        let md = "## Contradictions\n\nPlease tell us.\n\n1. **Wiring (safety)**\n   The manual contradicts itself.\n   - Which end?\n   - Is it fixed?\n2. Warranty"
+        let blocks = MarkdownBlock.parse(md)
+        #expect(blocks.map(\.marker) == [nil, nil, "1.", "•", "•", "2."])
+        #expect(blocks.map(\.depth) == [0, 0, 1, 2, 2, 1])
+        #expect(String(blocks[2].text.characters) == "Wiring (safety)\nThe manual contradicts itself.")
+        if case .header(2) = blocks[0].kind {} else { Issue.record("expected a level 2 heading") }
+    }
+
+    @Test func tablesGatherIntoRows() throws {
+        let blocks = MarkdownBlock.parse("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\nAfter")
+        #expect(blocks.count == 2)
+        guard case .table(let rows, let header) = blocks[0].kind else { Issue.record("expected a table"); return }
+        #expect(header)
+        #expect(rows.map { $0.map { String($0.characters) } } == [["A", "B"], ["1", "2"], ["3", "4"]])
+    }
+
+    @Test func codeFencesKeepTheirLines() {
+        let blocks = MarkdownBlock.parse("```\nlet x = 1\nlet y = 2\n```")
+        #expect(String(blocks[0].text.characters) == "let x = 1\nlet y = 2\n")
+    }
+}
+
+@Suite @MainActor struct FormattingConversionTests {
+    private func markdown(_ html: String) -> String? { RichText.markdown(from: RichContent(html: html)) }
+
+    @Test func gmailMessageBecomesMarkdown() throws {
+        let html = #"<div dir="ltr"><div>Hi Sam,</div><div><br></div><div>Here is <b>the plan</b> and <a href="https://x.com/plan">a link</a>.</div><div>Second line</div><ul><li>One</li><li>Two<ul><li>Nested</li></ul></li></ul><ol><li>First</li><li>Second</li></ol><div><br></div><div>Thanks,</div><div>Marty</div></div>"#
+        let md = try #require(markdown(html))
+        #expect(md == """
+            Hi Sam,
+
+            Here is **the plan** and [a link](https://x.com/plan).
+            Second line
+
+            - One
+            - Two
+                - Nested
+            1. First
+            2. Second
+
+            Thanks,
+            Marty
+            """)
+    }
+
+    @Test func webPageHeadingsTablesAndCode() throws {
+        let html = #"<h1>Title</h1><p>Para one with <i>italic</i> and <code>code</code>.</p><p>Para two&nbsp;here.</p><h3>Sub</h3><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table><pre>let x = 1</pre>"#
+        let md = try #require(markdown(html))
+        #expect(md == """
+            # Title
+
+            Para one with *italic* and `code`.
+
+            Para two here.
+
+            ### Sub
+
+            | A | B |
+            | --- | --- |
+            | 1 | 2 |
+
+            ```
+            let x = 1
+            ```
+            """)
+    }
+
+    @Test func plainOrAllCodeHasNoMarkdown() {
+        #expect(markdown("<div>Just text</div><div>and more</div>") == nil)
+        #expect(markdown(#"<div style="font-family: Menlo"><div>let x = 1</div><div>let y = 2</div></div>"#) == nil)
+    }
+
+    @Test func escapesOnlyWhatWouldFormat() throws {
+        let md = try #require(markdown("<div><b>Math</b></div><div>5*3</div><div>a *star* pair</div><div># not a heading</div><div>1. not a list</div>"))
+        #expect(md == "**Math**\n5*3\na \\*star\\* pair\n\\# not a heading\n1\\. not a list")
+    }
+
+    @Test func outputsPutTheRightVersionsOnTheClipboard() throws {
+        let md = "## Plan\n\n- **Ship** it\n- Read [the docs](https://example.com)"
+        let formatted = RichText.content(md, as: .formatted)
+        #expect(formatted.text == "Plan\n\n• Ship it\n• Read the docs (https://example.com)")
+        #expect(formatted.rich?.html?.contains("<h2>Plan</h2>") == true)
+        let rtf = try #require(formatted.rich?.rtf)
+        let attr = try #require(NSAttributedString(rtf: rtf, documentAttributes: nil))
+        #expect((attr.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.familyName == "Helvetica Neue")
+
+        #expect(RichText.content(md, as: .markdown) == PasteContent(text: md))
+        #expect(RichText.content(md, as: .plain) == PasteContent(text: formatted.text))
+        // Nothing to format: the text goes as it is.
+        #expect(RichText.content("{\n  \"a\": 1\n}", as: .formatted) == PasteContent(text: "{\n  \"a\": 1\n}"))
+    }
+
+    @Test func originalPastesTheWayTheSelectionWas() {
+        let polish = Transformer(name: "Polish", prompt: "Polish {selection}")
+        #expect(polish.output == .original)
+        let formatted = TransformInput(text: "Hi there", source: .clipboard, rich: RichContent(html: "<div>Hi <b>there</b></div>"))
+        let plain = TransformInput(text: "Hi there", source: .clipboard)
+        #expect(TransformRun(transformer: polish, input: formatted, context: .init(), ai: .shared).pasteFormat == .formatted)
+        #expect(TransformRun(transformer: polish, input: plain, context: .init(), ai: .shared).pasteFormat == .markdown)
+        let reddit = Transformer(name: "Reddit", prompt: "Format for Reddit", output: .markdown)
+        #expect(TransformRun(transformer: reddit, input: formatted, context: .init(), ai: .shared).pasteFormat == .markdown)
+    }
+
+    @Test func clipsOfferOnlyFormatsThatChangeSomething() {
+        func clip(_ text: String, rich: RichContent? = nil, secret: Bool = false) -> ClipPayload {
+            var p = ClipPayload(machineID: "m", machineName: "Mac", kind: .text, hash: "h")
+            p.text = text
+            p.rich = rich
+            p.isSecret = secret
+            return p
+        }
+        let plain = clip("Just a note")
+        #expect(![ClipFormat.formatted, .markdown, .plain].contains(where: plain.offers))
+        #expect(plain.formatName == "Plain text")
+
+        let markdown = clip("## Plan\n\n- **Ship** it")
+        #expect(markdown.offers(.formatted) && markdown.offers(.plain) && !markdown.offers(.markdown))
+        #expect(markdown.content(as: .formatted).rich?.html?.contains("<h2>Plan</h2>") == true)
+        #expect(markdown.content(as: .plain) == PasteContent(text: "Plan\n\n• Ship it"))
+
+        let gmail = clip("Hi there", rich: RichContent(html: "<div>Hi <b>there</b></div>"))
+        #expect(gmail.offers(.markdown) && gmail.offers(.plain) && !gmail.offers(.formatted))
+        #expect(gmail.content(as: .markdown) == PasteContent(text: "Hi **there**"))
+        #expect(gmail.content(as: .plain) == PasteContent(text: "Hi there"))
+        #expect(gmail.formatName == "Formatted")
+
+        #expect(!clip("## Key", secret: true).offers(.formatted))
+    }
+
+    @Test func oldTransformersAndClipsStillDecode() throws {
+        let t = try JSONDecoder().decode(Transformer.self, from: Data(#"{"name":"Polish","prompt":"Polish {selection}"}"#.utf8))
+        #expect(t.output == .original)
+        let clip = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","created":0,"machineID":"m","machineName":"Mac","kind":"text","text":"hi","isSecret":false,"hash":"h"}"#
+        #expect(try JSONDecoder().decode(ClipPayload.self, from: Data(clip.utf8)).rich == nil)
+    }
+
+    @Test func sameTextIgnoresWhitespace() {
+        #expect(SelectionReader.sameText("Hi  there\n", "Hi there"))
+        #expect(!SelectionReader.sameText("Hi there", "Bye there"))
     }
 }

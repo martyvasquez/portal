@@ -324,9 +324,14 @@ private struct TransformRunView: View {
                 ProgressView().controlSize(.small)
                 Text(run.followUps.isEmpty ? "Working on it…" : "Revising…").foregroundStyle(.secondary)
             }
+        } else if run.pasteFormat == .formatted, !looksLikeCode, RichText.html(fromMarkdown: run.output) != nil {
+            // Drawn as it will paste.
+            MarkdownText(markdown: run.output)
+                .lineSpacing(2)
+                .textSelection(.enabled)
         } else {
-            Text(run.output)
-                .font(looksLikeCode ? .callout.monospaced() : .body)
+            Text(run.pasteFormat == .plain ? RichText.plainText(fromMarkdown: run.output) : run.output)
+                .font(looksLikeCode || run.transformer.output == .markdown ? .callout.monospaced() : .body)
                 .lineSpacing(2)
                 .textSelection(.enabled)
         }
@@ -341,7 +346,13 @@ private struct TransformRunView: View {
         let chars = run.input.text.count.formatted()
         if run.isRunning { return "\(run.modelName) · \(chars) characters" }
         if run.error != nil { return run.modelName }
-        return "\(run.modelName) · \(chars) → \(run.output.count.formatted()) characters"
+        let done = "\(run.modelName) · \(chars) → \(run.output.count.formatted()) characters"
+        switch run.pasteFormat {
+        case .formatted: return RichText.html(fromMarkdown: run.output) == nil ? done : done + " · Pastes with formatting"
+        case .markdown: return run.transformer.output == .original ? done : done + " · Pastes as Markdown"
+        case .plain: return done + " · Pastes as plain text"
+        case .original: return done
+        }
     }
 
     private var hints: [(String, String)] {

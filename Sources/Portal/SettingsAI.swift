@@ -11,7 +11,7 @@ struct TransformersPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(title: "Transformers", subtitle: "Prompts that rewrite the text you've selected, with ChatGPT.") {
+            PageHeader(title: "AI Transformers", subtitle: "Prompts that rewrite the text you've selected, with ChatGPT.") {
                 Button {
                     editing = TransformerDraft(transformer: Transformer(name: "", prompt: ""), isNew: true)
                 } label: {
@@ -25,7 +25,7 @@ struct TransformersPage: View {
                 HStack(spacing: 12) {
                     Image(systemName: "sparkles").foregroundStyle(.indigo).font(.title3)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Sign in with ChatGPT to use transformers")
+                        Text("Sign in with ChatGPT to use AI transformers")
                         Text("They run on your ChatGPT Plus or Pro plan. No API key needed.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -126,6 +126,7 @@ private struct TransformerCard: View {
             Spacer(minLength: 12)
             if let scope = transformer.scopeLabel { Pill(text: scope) }
             if let modelName { Pill(text: modelName) }
+            if transformer.output != .original { Pill(text: transformer.output.title) }
             Pill(text: transformer.action.title)
             if let hotKey = transformer.hotKey { KeyCap(text: hotKey.display) }
             Menu {
@@ -197,8 +198,9 @@ private struct TransformerEditor: View {
                             .help(Self.help[variable] ?? "")
                     }
                 }
-                Text("**{selection}** is the highlighted text; if the prompt doesn't use it, the text goes at the end.")
+                Text("**{selection}** is the highlighted text, with its formatting as Markdown; if the prompt doesn't use it, the text goes at the end.")
                     .font(.caption).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 14) {
@@ -212,6 +214,18 @@ private struct TransformerEditor: View {
                         .labelsHidden()
                         .fixedSize()
                         Text(actionHelp).font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                GridRow {
+                    Text("Paste as").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Picker("", selection: $transformer.output) {
+                            ForEach(TransformOutput.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        Text(transformer.output.help).font(.caption).foregroundStyle(.tertiary)
                     }
                 }
                 ScopeRows(item: $transformer, newSite: $newSite, newExcludedSite: $newExcludedSite,
@@ -340,7 +354,7 @@ struct ChatGPTPage: View {
                 }
 
                 Section {
-                    Picker("Transform with Prompt", selection: $settings.values.customPromptAction) {
+                    Picker("Transform with AI", selection: $settings.values.customPromptAction) {
                         ForEach(TransformAction.allCases) { Text($0.title).tag($0) }
                     }
                 } footer: {

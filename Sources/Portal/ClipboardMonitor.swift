@@ -77,6 +77,8 @@ final class ClipboardMonitor {
                     lastChange = pb.changeCount
                 }
             }
+            // Keep the copy's formatting, so it pastes back the way it was copied.
+            if !p.isSecret, p.originalText == nil { p.rich = RichContent.read(from: pb) }
             p.hash = Crypto.sha256(Data((p.text ?? s).utf8))
         } else if let (png, w, h) = Self.imageData(pb) {
             guard png.count <= v.maxImageMB * 1_048_576 else { return }
@@ -156,18 +158,57 @@ enum SecretDetector {
     }
 }
 
+/// Ways to paste a text clip other than as it was copied.
+enum ClipFormat { case formatted, markdown, plain }
+
+extension ClipPayload {
+    /// Plain text that's Markdown with formatting, like a reply copied from ChatGPT or a README.
+    var isMarkdown: Bool {
+        kind == .text && rich == nil && text.map { RichText.html(fromMarkdown: $0) != nil } == true
+    }
+
+    /// The format would paste something different from the copy: Markdown becomes formatting,
+    /// formatting becomes Markdown, and either can go as plain text. Never for secrets.
+    func offers(_ format: ClipFormat) -> Bool {
+        guard !isSecret, kind == .text || kind == .url else { return false }
+        switch format {
+        case .formatted: return isMarkdown
+        case .markdown: return rich != nil
+        case .plain: return rich != nil || isMarkdown
+        }
+    }
+
+    /// "Formatted", "Markdown", or "Plain text": what the copy is, for the preview.
+    var formatName: String? {
+        guard !isSecret, kind == .text else { return nil }
+        return rich != nil ? "Formatted" : isMarkdown ? "Markdown" : "Plain text"
+    }
+
+    /// The clip's text in `format`. Plain text of a formatted copy is the app's own plain version.
+    @MainActor func content(as format: ClipFormat) -> PasteContent {
+        let text = self.text ?? ""
+        switch format {
+        case .formatted: return RichText.content(text, as: .formatted)
+        case .markdown: return PasteContent(text: rich.flatMap(RichText.markdown(from:)) ?? text)
+        case .plain: return PasteContent(text: rich != nil ? text : RichText.plainText(fromMarkdown: text))
+        }
+    }
+}
+
 @MainActor
 enum Paster {
-    static func write(_ clip: Clip, original: Bool = false) {
+    /// Puts a clip back on the clipboard as it was copied, formatting included, or in `format`.
+    /// `original` is a terminal copy before cleanup.
+    static func write(_ clip: Clip, format: ClipFormat? = nil, original: Bool = false) {
         let pb = NSPasteboard.general
         pb.clearContents()
         let p = clip.payload
         switch p.kind {
-        case .text:
-            pb.setString((original ? p.originalText : nil) ?? p.text ?? "", forType: .string)
-        case .url:
-            pb.setString(p.text ?? "", forType: .string)
-            pb.setString(p.text ?? "", forType: .URL)
+        case .text, .url:
+            let content = original ? PasteContent(text: p.originalText ?? p.text ?? "")
+                : format.map(p.content(as:)) ?? PasteContent(text: p.text ?? "", rich: p.rich)
+            content.write(to: pb)
+            if p.kind == .url, format == nil { pb.setString(p.text ?? "", forType: .URL) }
         case .image:
             if let png = p.image {
                 pb.setData(png, forType: .png)

@@ -12,6 +12,8 @@ struct ClipPayload: Codable, Sendable {
     var kind: ClipKind
     var text: String?
     var originalText: String?   // before terminal cleanup, when it changed anything
+    /// The formatted versions (HTML, RTF) the app copied along with the text.
+    var rich: RichContent?
     var image: Data?
     var imageWidth: Int?
     var imageHeight: Int?
@@ -25,7 +27,6 @@ struct ClipPayload: Codable, Sendable {
 struct Clip: Identifiable, Sendable {
     let payload: ClipPayload
     let fileURL: URL
-    let pinned: Bool
 
     var id: UUID { payload.id }
     var created: Date { payload.created }
@@ -58,22 +59,19 @@ struct Clip: Identifiable, Sendable {
     }
 }
 
-/// `<epoch-ms>_<uuid>_<flags>.clip` — flags are p (pinned) / s (secret) / n (none).
-/// Metadata lives in the name so expiry can run without decrypting anything.
+/// `<epoch-ms>_<uuid>_<flags>.clip` — flags are s (secret) / n (none). Older clips may carry p,
+/// from when clips could be pinned; it's ignored. Metadata lives in the name so expiry can run
+/// without decrypting anything.
 enum ClipFileName {
-    static func make(created: Date, id: UUID, pinned: Bool, secret: Bool) -> String {
-        var flags = ""
-        if pinned { flags += "p" }
-        if secret { flags += "s" }
-        if flags.isEmpty { flags = "n" }
-        return "\(Int64(created.timeIntervalSince1970 * 1000))_\(id.uuidString)_\(flags).clip"
+    static func make(created: Date, id: UUID, secret: Bool) -> String {
+        "\(Int64(created.timeIntervalSince1970 * 1000))_\(id.uuidString)_\(secret ? "s" : "n").clip"
     }
 
-    static func parse(_ name: String) -> (created: Date, id: UUID, pinned: Bool, secret: Bool)? {
+    static func parse(_ name: String) -> (created: Date, id: UUID, secret: Bool)? {
         guard name.hasSuffix(".clip") else { return nil }
         let parts = name.dropLast(5).split(separator: "_")
         guard parts.count == 3, let ms = Int64(parts[0]), let id = UUID(uuidString: String(parts[1])) else { return nil }
-        return (Date(timeIntervalSince1970: Double(ms) / 1000), id, parts[2].contains("p"), parts[2].contains("s"))
+        return (Date(timeIntervalSince1970: Double(ms) / 1000), id, parts[2].contains("s"))
     }
 }
 
@@ -161,12 +159,11 @@ final class ClipStore: ObservableObject {
 
     func add(_ payload: ClipPayload) {
         let ctx = context
-        // Same content copied again: drop the older copy (keeping its pin) so it moves to the top.
+        // Same content copied again: drop the older copy so it moves to the top.
         let dupes = clips.filter { $0.payload.hash == payload.hash }
-        let pinned = dupes.contains { $0.pinned }
-        let name = ClipFileName.make(created: payload.created, id: payload.id, pinned: pinned, secret: payload.isSecret)
+        let name = ClipFileName.make(created: payload.created, id: payload.id, secret: payload.isSecret)
         let url = ctx.ownDir.appendingPathComponent(name)
-        let clip = Clip(payload: payload, fileURL: url, pinned: pinned)
+        let clip = Clip(payload: payload, fileURL: url)
 
         clips.removeAll { $0.payload.hash == payload.hash }
         clips.insert(clip, at: 0)
@@ -192,24 +189,13 @@ final class ClipStore: ObservableObject {
         io.async { try? FileManager.default.removeItem(at: clip.fileURL) }
     }
 
-    func togglePin(_ clip: Clip) {
-        let newName = ClipFileName.make(created: clip.created, id: clip.id, pinned: !clip.pinned, secret: clip.isSecret)
-        let newURL = clip.fileURL.deletingLastPathComponent().appendingPathComponent(newName)
-        let updated = Clip(payload: clip.payload, fileURL: newURL, pinned: !clip.pinned)
-        if let i = clips.firstIndex(where: { $0.id == clip.id }) { clips[i] = updated }
-        cache[clip.fileURL.path] = nil
-        cache[newURL.path] = updated
-        io.async { try? FileManager.default.moveItem(at: clip.fileURL, to: newURL) }
-    }
-
     func clearThisMac() {
         let dir = context.ownDir
         let mine = settings.machineID
-        clips.removeAll { $0.payload.machineID == mine && !$0.pinned }
+        clips.removeAll { $0.payload.machineID == mine }
         io.async {
             let fm = FileManager.default
             for f in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
-                if let meta = ClipFileName.parse(f.lastPathComponent), meta.pinned { continue }
                 try? fm.removeItem(at: f)
             }
         }
@@ -248,7 +234,7 @@ final class ClipStore: ObservableObject {
         let fm = FileManager.default
         var result = ScanResult()
         let now = Date()
-        var ownUnpinned: [Clip] = []
+        var own: [Clip] = []
         let machineDirs = (try? fm.contentsOfDirectory(at: ctx.root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
 
         for dir in machineDirs where (try? dir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
@@ -265,7 +251,7 @@ final class ClipStore: ObservableObject {
 
                 // Expire. Any Mac may remove expired files, so one that's been asleep for a week can't keep them alive.
                 let days = meta.secret ? ctx.secretRetentionDays : ctx.retentionDays
-                if !meta.pinned && now.timeIntervalSince(meta.created) > Double(days) * 86400 {
+                if now.timeIntervalSince(meta.created) > Double(days) * 86400 {
                     try? fm.removeItem(at: file)
                     continue
                 }
@@ -283,16 +269,16 @@ final class ClipStore: ObservableObject {
                         result.failed += 1
                         continue
                     }
-                    clip = Clip(payload: payload, fileURL: real, pinned: meta.pinned)
+                    clip = Clip(payload: payload, fileURL: real)
                 }
                 result.cache[real.path] = clip
-                if isOwn && !clip.pinned { ownUnpinned.append(clip) }
+                if isOwn { own.append(clip) }
             }
         }
 
-        if ownUnpinned.count > ctx.maxPerMachine {
-            ownUnpinned.sort { $0.created > $1.created }
-            for extra in ownUnpinned.dropFirst(ctx.maxPerMachine) {
+        if own.count > ctx.maxPerMachine {
+            own.sort { $0.created > $1.created }
+            for extra in own.dropFirst(ctx.maxPerMachine) {
                 try? fm.removeItem(at: extra.fileURL)
                 result.cache[extra.fileURL.path] = nil
             }

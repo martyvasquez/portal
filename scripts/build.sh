@@ -47,6 +47,8 @@ cp "$BIN_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
 ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 [[ -f Resources/AppIcon.icns ]] || swift scripts/make-icon.swift .
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Binary distributions carry the licenses of the code they include.
+cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/THIRD-PARTY-NOTICES.md"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

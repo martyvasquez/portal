@@ -295,10 +295,15 @@ enum SnippetPaster {
     /// Pastes `text` into the front app via the clipboard, then puts the clipboard back (unless
     /// `keepOnClipboard`). Both writes carry Portal's marker so clipboard history ignores them.
     static func paste(_ text: String, keepOnClipboard: Bool = false) {
+        paste(PasteContent(text: text), keepOnClipboard: keepOnClipboard)
+    }
+
+    /// Pastes text with its formatted versions, for apps that show formatting.
+    static func paste(_ content: PasteContent, keepOnClipboard: Bool = false) {
         let pb = NSPasteboard.general
         let saved = keepOnClipboard ? nil : PasteboardSnapshot(pb)
         pb.clearContents()
-        pb.setString(text, forType: .string)
+        content.write(to: pb)
         if !keepOnClipboard { pb.setData(Data(), forType: .portalMarker) }
 
         guard Permissions.accessibilityGranted else {
@@ -312,8 +317,12 @@ enum SnippetPaster {
     }
 
     static func copy(_ text: String) {
+        copy(PasteContent(text: text))
+    }
+
+    static func copy(_ content: PasteContent) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(text, forType: .string)
+        content.write(to: pb)
     }
 }

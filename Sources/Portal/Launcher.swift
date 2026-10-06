@@ -39,7 +39,7 @@ struct LaunchItem: Identifiable, Hashable, Sendable {
         if let section { return section }
         switch kind {
         case .calculator: return "Calculator"
-        case .transform: return "Transform Selection"
+        case .transform: return "AI Transform"
         case .finder: return "Finder Selection"
         case .snippet, .folderAction: return "Snippets"
         case .quicklink: return "Quicklinks"
@@ -235,7 +235,7 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var notice: String?
     /// The selected text (or a clip) that transformers work on.
     @Published private(set) var transformInput: TransformInput?
-    /// Typing a one-off prompt for "Transform with Prompt".
+    /// Typing a one-off prompt for "Transform with AI".
     @Published private(set) var promptMode = false
     /// The transformer that's running or showing its result.
     @Published private(set) var run: TransformRun?
@@ -247,6 +247,8 @@ final class LauncherModel: ObservableObject {
     private var queued: (input: TransformInput, transformer: Transformer?)?
     /// Opened from clipboard history: only transformers, no apps or quicklinks.
     private var transformOnly = false
+    /// The app the launcher opened over, for reading its selection's formatting when a transformer runs.
+    private var frontApp: NSRunningApplication?
     private var showCount = 0
     let ai = AIService.shared
     /// Launcher row id → (items to open, app to open them with).
@@ -344,6 +346,7 @@ final class LauncherModel: ObservableObject {
         finder = nil
         notice = nil
         let front = NSWorkspace.shared.frontmostApplication
+        frontApp = front
         context = SnippetContext(appID: front?.bundleIdentifier, appName: front?.localizedName)
         let queued = self.queued
         self.queued = nil
@@ -358,9 +361,9 @@ final class LauncherModel: ObservableObject {
             case .none:
                 break
             case .unsupported:
-                SelectionReader.copiedText(from: front, keystroke: false) { text in
-                    guard let text, shown == self.showCount, self.transformInput == nil else { return }
-                    self.transformInput = TransformInput(text: text, source: .selection)
+                SelectionReader.copiedSelection(from: front, keystroke: false) { input in
+                    guard let input, shown == self.showCount, self.transformInput == nil else { return }
+                    self.transformInput = input
                     if self.run == nil && self.pending == nil && !self.promptMode { self.search() }
                 }
             }
@@ -394,22 +397,22 @@ final class LauncherModel: ObservableObject {
     /// match where you are (or every global one, when none do), and the global ones left over.
     private func makeTransformItems() -> (matching: [LaunchItem], others: [LaunchItem]) {
         guard let input = transformInput else { return ([], []) }
-        let section = input.source == .clipboard ? "Transform Clip" : "Transform Selection"
+        let section = input.source == .clipboard ? "AI Transform Clip" : "AI Transform"
         guard ai.isSignedIn else {
             var item = LaunchItem(id: "ai:signin", name: "Sign In with ChatGPT",
-                                  subtitle: "Transformers run on your ChatGPT Plus or Pro plan",
+                                  subtitle: "AI transformers run on your ChatGPT Plus or Pro plan",
                                   path: "", kind: .transform, symbol: "sparkles",
                                   keywords: "transform transformer ai chatgpt")
             item.section = section
             return ([item], [])
         }
+        let all = settings.values.transformers
         // Scopes apply to selections; a clip can be headed anywhere, so it gets every transformer.
         var matching: [LaunchItem]
         var others: [LaunchItem] = []
         if input.source == .clipboard {
-            matching = settings.values.transformers.map { transformRow($0, section: section) }
+            matching = all.map { transformRow($0, section: section) }
         } else {
-            let all = settings.values.transformers
             let matches = all.filter { !$0.isGlobal && $0.applies(app: context.appID, url: context.url) }
             let global = all.filter { $0.isGlobal && $0.applies(app: context.appID, url: context.url) }
             if matches.isEmpty {
@@ -420,7 +423,7 @@ final class LauncherModel: ObservableObject {
                 others = global.map { transformRow($0, section: "Everywhere") }
             }
         }
-        var custom = LaunchItem(id: "transform:custom", name: "Transform with Prompt…",
+        var custom = LaunchItem(id: "transform:custom", name: "Transform with AI…",
                                 subtitle: "Type what to do with the \(input.source == .clipboard ? "clip" : "selection")",
                                 path: "", kind: .transform, symbol: "text.bubble",
                                 keywords: "transformer ai prompt ask chatgpt custom")
@@ -450,7 +453,7 @@ final class LauncherModel: ObservableObject {
         var item = LaunchItem(id: "transform:inline", name: prompt,
                               subtitle: "Runs this prompt on the \(input.source == .clipboard ? "clip" : "selection")",
                               path: "", kind: .transform, symbol: "text.bubble")
-        item.section = input.source == .clipboard ? "Transform Clip" : "Transform Selection"
+        item.section = input.source == .clipboard ? "AI Transform Clip" : "AI Transform"
         item.badge = actionLabel(settings.values.customPromptAction)
         return item
     }
@@ -1036,6 +1039,16 @@ extension LauncherModel {
 
     func startTransform(_ transformer: Transformer, action: TransformAction? = nil) {
         guard let input = transformInput else { return }
+        if input.source == .selection, !input.formattingRead {
+            // Read with Accessibility, which has no formatting: get it from the app's Copy first.
+            let shown = showCount
+            SelectionReader.withFormatting(input, from: frontApp, keystroke: false) { input in
+                guard shown == self.showCount, self.run == nil else { return }
+                self.transformInput = input
+                self.startTransform(transformer, action: action)
+            }
+            return
+        }
         let context = TransformPrompt.Context(app: context.appName, url: context.url,
                                               clipboard: NSPasteboard.general.string(forType: .string))
         let run = TransformRun(transformer: transformer, input: input, context: context, ai: ai)
@@ -1052,14 +1065,16 @@ extension LauncherModel {
     }
 
     /// Pastes over the selection (or into the app, for a clip) once the launcher closes,
-    /// or copies and shows a confirmation before closing.
+    /// or copies and shows a confirmation before closing. The result goes in the run's paste
+    /// format: formatted, Markdown, or plain text.
     func deliver(_ text: String, _ action: TransformAction) {
+        let content = RichText.content(text, as: run?.pasteFormat ?? .formatted)
         guard action == .copy || !canPaste else {
             onDismiss()
-            SnippetPaster.paste(text)
+            SnippetPaster.paste(content)
             return
         }
-        SnippetPaster.copy(text)
+        SnippetPaster.copy(content)
         copied = true
         let shown = showCount
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in

@@ -48,8 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         clipboardPanel.keyHandler = { [unowned self] in clipModel.handleKey($0) }
         clipboardPanel.onShow = { [unowned self] in clipModel.prepareForShow() }
         clipModel.onDismiss = { [unowned self] in clipboardPanel.hide() }
-        clipModel.onTransform = { [unowned self] text in
-            launcher.queue(TransformInput(text: text, source: .clipboard))
+        clipModel.onTransform = { [unowned self] input in
+            launcher.queue(input)
             launcherPanel.show()
         }
 
@@ -102,7 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     let name = t.dropFirst("transform:".count).dropLast(copy ? ":copy".count : 0)
                     var transformer = self.settings.values.transformers.first { $0.name == name }
                     transformer?.action = copy ? .copy : .preview
-                    self.launcher.queue(TransformInput(text: text, source: .clipboard), transformer: transformer)
+                    let input = TransformInput(text: text, source: .clipboard, rich: RichContent.read(from: .general))
+                    self.launcher.queue(input, transformer: transformer)
                     self.launcherPanel.show()
                 case let t? where t.hasPrefix("page:"):
                     if let page = SettingsPage.allCases.first(where: { "page:\($0)" == t }) { self?.router.page = page }
@@ -196,10 +197,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             run(command: "chatgpt")
             return
         }
-        SelectionReader.read(from: front) { [weak self] text in
+        SelectionReader.read(from: front) { [weak self] input in
             guard let self else { return }
-            guard let text else { NSSound.beep(); return }   // nothing selected
-            launcher.queue(TransformInput(text: text, source: .selection), transformer: transformer)
+            guard let input else { NSSound.beep(); return }   // nothing selected
+            launcher.queue(input, transformer: transformer)
             launcherPanel.show()
         }
     }

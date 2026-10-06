@@ -160,7 +160,7 @@ struct SharedSettings: Codable, Equatable {
     var ignoredBundleIDs: [String] = []
 
     var transformers: [Transformer] = Transformer.starters
-    /// What "Transform with Prompt" does with its result.
+    /// What "Transform with AI" does with its result.
     var customPromptAction: TransformAction = .preview
     /// Launcher rows shown before you type, in order, whatever the context: ids of quicklinks,
     /// global snippets and transformers, apps, and commands.

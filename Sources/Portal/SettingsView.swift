@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
     case general = "General", defaults = "Default Results", quicklinks = "Quicklinks", snippets = "Snippets"
-    case transformers = "Transformers", openWith = "Open With", clipboard = "Clipboard", chatgpt = "ChatGPT", sync = "Sync"
+    case transformers = "AI Transformers", openWith = "Open With", clipboard = "Clipboard", chatgpt = "ChatGPT", sync = "Sync"
     var id: String { rawValue }
 
     var symbol: String {
@@ -1426,7 +1426,7 @@ private struct ClipboardPage: View {
                     let mine = store.clips.filter { $0.payload.machineID == settings.machineID }.count
                     LabeledContent("Stored", value: "\(store.clips.count) clips, \(mine) from this Mac")
                     Button("Clear History from This Mac…", role: .destructive) { confirmClear = true }
-                        .confirmationDialog("Delete every unpinned clip copied on this Mac?", isPresented: $confirmClear) {
+                        .confirmationDialog("Delete every clip copied on this Mac?", isPresented: $confirmClear) {
                             Button("Delete", role: .destructive) { store.clearThisMac() }
                         }
                 }

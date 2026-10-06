@@ -38,7 +38,7 @@ Everything is configured in a real Settings window, stored as plain JSON, and sy
   - [Quicklinks](#quicklinks)
   - [Snippets](#snippets)
   - [Calculator](#calculator)
-  - [Transformers (ChatGPT)](#transformers)
+  - [AI Transformers (ChatGPT)](#transformers)
   - [Open With for Finder](#open-with)
   - [Default results: pinned and recent](#default-results)
 - [Clipboard history](#clipboard-history)
@@ -56,7 +56,7 @@ Everything is configured in a real Settings window, stored as plain JSON, and sy
 |---|---|
 | **Context-aware snippets** | Different snippets for each repo (from a `.portal.json` that travels with git), each website, and each app. Portal reads the folder from Ghostty or Terminal and the page from your browser. |
 | **Quicklinks with hotkeys** | Folders and URLs that open in the app you choose (Ghostty, Chrome, Sublime Text…), each with an optional hotkey. Show them everywhere or only on certain sites and apps. `{query}` links ask for text first. |
-| **AI transformers** | Select text anywhere, open the launcher, pick "Polish" or "Summarize". Runs on your ChatGPT Plus/Pro plan; no API key. |
+| **AI transformers** | Select text anywhere, open the launcher, pick "Polish" or "Summarize". Runs on your ChatGPT Plus/Pro plan; no API key. Formatting comes along: Gmail stays formatted, code editors stay plain. |
 | **Encrypted, synced clipboard** | AES-256-GCM per clip, a passphrase that never leaves your Macs, and sync through iCloud Drive with no merge conflicts. |
 | **Secrets handled properly** | API keys, tokens, and password manager copies are detected, masked, and expire sooner. |
 | **Terminal copy cleanup** | Copies from terminals lose trailing spaces, box borders, and hard wraps, so they paste cleanly. The original is one key away. |
@@ -68,7 +68,7 @@ Everything is configured in a real Settings window, stored as plain JSON, and sy
 
 Press **⌘Space**. With nothing typed, the launcher shows what fits where you are, in this order:
 
-1. **Transformers**, when text is selected.
+1. **AI Transformers**, when text is selected.
 2. **Finder Selection**, when Finder is in front: rows to open what's selected with your Open With apps.
 3. **Snippets** for this folder, this site, and this app.
 4. **Pinned** rows, in the order you set.
@@ -179,17 +179,18 @@ Type math and the answer appears as you type. `↩` pastes the answer (and leave
 Turn it off in Settings → General → Calculator.
 
 <a id="transformers"></a>
-### Transformers (ChatGPT)
+### AI Transformers
 
-**Settings → Transformers.** Transformers are prompts that rewrite the text you've selected, using ChatGPT. Select text in any
-app and open the launcher: your transformers come first.
+**Settings → AI Transformers.** AI transformers are prompts that rewrite the text you've selected, using
+ChatGPT. Select text in any app and open the launcher: your transformers come first.
 
 <p align="center">
   <img src="docs/images/transformers.png" width="49%" alt="The launcher offering Polish, Summarize, Clean Up JSON, and Convert to Markdown for selected text">
   <img src="docs/images/transform-preview.png" width="49%" alt="The Polish transformer's result shown above the original selection">
 </p>
 
-Each transformer has a name, a prompt like `Polish and refine {selection}`, and what to do with the result:
+Each transformer has a name, a prompt like `Polish and refine {selection}`, what it pastes as, and what to
+do with the result:
 
 | When done | What happens |
 |---|---|
@@ -199,18 +200,33 @@ Each transformer has a name, a prompt like `Polish and refine {selection}`, and 
 
 In the launcher, `⌘↩` previews any transformer and `⌥↩` copies its result, whatever its setting.
 
+**Formatting.** A formatted selection (from Gmail, a web page, Notes, or Docs) goes to ChatGPT as Markdown,
+so its headings, bold, lists, links, and tables come back. The result pastes as the transformer's
+**Paste as** setting:
+
+| Paste as | What lands |
+|---|---|
+| **Original** (default) | The way the selection was: formatted if it was formatted (Gmail, Notes, Docs), plain text if it was plain (a text box, a code editor). |
+| **Formatted** | Formatting, like ChatGPT's copy button: Gmail, Notes, and Docs get headings, bold, lists, and links; other apps get clean text. |
+| **Markdown** | The Markdown itself, for GitHub, Obsidian, Reddit, and READMEs. |
+| **Plain Text** | Clean text with no formatting and no Markdown, for messages and forms. |
+
+A preview draws the result the way it will paste. To get formatting from ChatGPT, ask for it in the prompt,
+like `Format this for an email with a bulleted summary`. To only change formatting, without AI, use the
+[clipboard](#clipboard-history): copy, then `⌘F`, `⌘M`, or `⌘P`.
+
 - **Prompt variables**: `{selection}`, `{app}` (the app you're in), `{url}` (your browser's page), `{clipboard}`. A prompt without `{selection}` gets the text added at the end.
-- **One-off prompts**: type `transform` and your prompt, like `transform translate to Spanish`, and press `↩`. Or pick **Transform with Prompt…**.
+- **One-off prompts**: type `transform` and your prompt, like `transform translate to Spanish`, and press `↩`. Or pick **Transform with AI…**.
 - **Where it shows**: by default, on any selected text. Add apps (Mail) or websites (`mail.google.com`) under **Show in** and it shows only there, under its own heading ("For mail.google.com") above the global ones. A global transformer can list places under **Except in** where it stays hidden (say, your terminal).
 - **Hotkeys**: give a transformer a hotkey to run it on the selection without opening the list. A scoped transformer's hotkey only works where it shows, so transformers for different places can share one key.
-- **Clips**: in clipboard history, `⌘T` runs a transformer on the selected clip. Secrets are never sent.
+- **Clips**: in clipboard history, `⌘A` runs an AI transformer on the selected clip, formatting included. Secrets are never sent.
 - **Model**: the newest model your ChatGPT account offers, at low thinking so it's quick. Change it in Settings → ChatGPT, or per transformer.
 
 <p align="center">
   <img src="docs/images/settings-transformers.png" width="80%" alt="Transformers settings listing each transformer with its scope, action, and hotkey">
 </p>
 
-**Signing in.** Transformers run on your **ChatGPT Plus or Pro** plan through *Sign in with ChatGPT*, so
+**Signing in.** AI transformers run on your **ChatGPT Plus or Pro** plan through *Sign in with ChatGPT*, so
 there's no API key and no per-token billing. In Settings → ChatGPT, click **Continue with ChatGPT** and
 approve Portal in your browser. The sign-in is kept in the Keychain of each Mac. Requests are sent with
 `store: false`, so OpenAI doesn't keep them.
@@ -218,7 +234,8 @@ approve Portal in your browser. The sign-in is kept in the Keychain of each Mac.
 **How Portal reads the selection.** It asks the app through Accessibility, which works in most Mac apps.
 Apps that don't share their selection that way (Chrome, terminals, Electron apps) get their own
 Edit ▸ Copy pressed. Portal reads the copied text, puts your clipboard back, and keeps that copy out of
-clipboard history. Code editors (Sublime Text, VS Code, JetBrains) copy the cursor's line when nothing
+clipboard history. Accessibility only gives plain text, so when a transformer runs, Portal also presses
+Copy for the selection's formatting. Code editors (Sublime Text, VS Code, JetBrains) copy the cursor's line when nothing
 is selected; Portal recognizes that and doesn't offer transformers.
 
 <a id="open-with"></a>
@@ -256,11 +273,10 @@ and which Mac each clip came from.
   <img src="docs/images/clipboard.png" width="80%" alt="Clipboard history with text, links, a file, an image, a terminal command, and a masked secret">
 </p>
 
-- **Sidebar filters**: All, This Mac, Other Macs, Secrets, and Pinned.
 - **Secrets**: copies from password managers, plus anything that looks like an API key, token, or private key (OpenAI, Stripe, GitHub, AWS, Slack, Google, JWTs, PEM keys, …). They're masked in the list, can expire sooner, and are marked so other clipboard tools skip them.
 - **Terminal cleanup**: text copied from Ghostty, Terminal, iTerm, and other terminals is cleaned as you copy it. Trailing spaces, shared indentation, box borders, and Claude Code's `⏺` marker are removed, and wrapped prose is rejoined. Commands and code keep their line breaks. A plain `⌘V` pastes the cleaned text; `⇧↩` in history pastes the original.
+- **Formatting**: clips keep what the app copied, formatted versions (HTML, RTF) included, so `↩` pastes them exactly as they were copied. Three keys paste them another way, with no AI: `⌘F` turns Markdown (a reply copied from ChatGPT or Claude, a README) into real formatting for Gmail or Notes, `⌘M` turns formatted text into Markdown, and `⌘P` pastes plain text. The footer only shows the ones that would change something, and the preview says what the clip is.
 - **Images** get a preview; **file** clips list their paths.
-- **Plain text only**: clips keep their text, not their formatting.
 
 <p align="center">
   <img src="docs/images/clipboard-cleanup.png" width="49%" alt="A cleaned-up terminal copy with a note that Shift-Return pastes the original">
@@ -270,13 +286,14 @@ and which Mac each clip came from.
 | Key | Action |
 |---|---|
 | `↩` / `⌘↩` | Paste into the app you were in / copy only (swappable in Settings) |
+| `⌘F` | Paste Markdown as formatting |
+| `⌘M` | Paste formatted text as Markdown |
+| `⌘P` | Paste as plain text |
 | `⇧↩` | Paste the original of a cleaned-up terminal copy |
-| `⌘P` | Pin (pinned clips never expire) |
+| `⌘A` | Run an AI transformer on the clip |
 | `⌘R` | Reveal a masked secret |
-| `⌘T` | Run a transformer on the clip |
 | `⌘⌫` | Delete (on every Mac) |
 | `↑` `↓` | Move through clips |
-| `⇧⌘↑` `⇧⌘↓` or `⇥` | Move through the sidebar filters |
 | `⌘1` to `⌘9` | Paste one of the first nine clips |
 
 ## Sync
@@ -350,7 +367,7 @@ git pull && scripts/build.sh --install
 2. **Settings → General → Accessibility → Allow.**
 3. If macOS asks whether Portal may paste from other apps, choose **Always Allow**.
 4. **Settings → Sync**: enter the **same passphrase** on every Mac.
-5. **Settings → ChatGPT**: sign in if you want transformers.
+5. **Settings → ChatGPT**: sign in if you want AI transformers.
 6. Allow Portal to control **Finder, Ghostty, Terminal, and your browser** when macOS asks. If you clicked Don't Allow, change it in System Settings → Privacy & Security → Automation.
 
 <a id="settings-reference"></a>
@@ -367,7 +384,7 @@ git pull && scripts/build.sh --install
 | **Default Results** | Pinned rows and how many recent rows to show |
 | **Quicklinks** | Your quicklinks, grouped by app, with hotkeys |
 | **Snippets** | Global, app, and site snippets |
-| **Transformers** | Prompts, actions, scopes, and hotkeys |
+| **AI Transformers** | Prompts, what they paste as, actions, scopes, and hotkeys |
 | **Open With** | Apps for Finder folders and files, Treat as Folder types, hotkey |
 | **Clipboard** | Retention, size limits, secrets, what `↩` does, terminal cleanup, ignored apps |
 | **ChatGPT** | Sign in, default model and thinking level, what one-off prompts do |
@@ -414,6 +431,7 @@ fits the art to Apple's icon grid, and fills the whole icon shape so macOS doesn
 | `Calculator.swift` | Arithmetic parser for the launcher |
 | `Snippets.swift` | Snippet model, folder and browser detection, `.portal.json`, command detection, pasting |
 | `Transformers.swift`, `AI.swift` | Transformer model, prompts, selection reading, and runs |
+| `RichText.swift`, `MarkdownWriter.swift`, `MarkdownText.swift` | Formatting: clipboard HTML and RTF to Markdown and back, plain text, and the formatted preview |
 | `ChatGPT/` | Sign in with ChatGPT (OAuth loopback, JWT) and the streaming client |
 | `FinderSelection.swift` | Finder selection and Open With |
 | `ClipStore.swift`, `ClipboardMonitor.swift`, `ClipboardView.swift` | Clipboard storage and sync, capture and secret detection, and window |
@@ -453,3 +471,9 @@ Sign in with ChatGPT.
 
 Portal is released under the [MIT License](LICENSE). Use it, fork it, and change it however you like;
 keep the copyright notice with the code.
+
+### Acknowledgments
+
+Portal includes [Sparkle](https://github.com/sparkle-project/Sparkle) (MIT License) for updates and
+[swift-cmark](https://github.com/swiftlang/swift-cmark) (BSD 2-Clause License, copyright © 2014 John
+MacFarlane) for Markdown. Their licenses are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
