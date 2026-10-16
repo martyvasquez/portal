@@ -242,6 +242,8 @@ private struct ClipRow: View {
     @ViewBuilder private var icon: some View {
         if clip.isSecret {
             Image(systemName: "key.fill").foregroundStyle(Theme.secret)
+        } else if clip.payload.isDictation {
+            Image(systemName: "mic.fill").foregroundStyle(Theme.accent)
         } else if let id = clip.payload.sourceBundleID, let img = IconCache.appIcon(bundleID: id) {
             Image(nsImage: img).resizable()
         } else {

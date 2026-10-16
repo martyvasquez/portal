@@ -173,6 +173,12 @@ struct SharedSettings: Codable, Equatable {
     var aiModel: String?
     var aiEffort: String?
 
+    var dictationHotKey: KeyCombo?
+    /// Words dictation should expect, and what to replace when it mishears.
+    var dictionary: [DictionaryEntry] = []
+    /// nil = the Mac's language.
+    var dictationLocale: String?
+
     init() {}
 
     private enum LegacyKeys: String, CodingKey { case finderSelectionAppPath, transformerListing }
@@ -236,6 +242,9 @@ struct SharedSettings: Codable, Equatable {
         }
         aiModel = v(.aiModel, d.aiModel)
         aiEffort = v(.aiEffort, d.aiEffort)
+        dictationHotKey = v(.dictationHotKey, d.dictationHotKey)
+        dictionary = v(.dictionary, d.dictionary)
+        dictationLocale = v(.dictationLocale, d.dictationLocale)
     }
 }
 

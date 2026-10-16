@@ -5,5 +5,7 @@
     <!-- The hardened runtime blocks Apple Events without this: Portal asks Finder, Ghostty, and
          Terminal which folder you're in, and your browser which page you're on. -->
     <key>com.apple.security.automation.apple-events</key><true/>
+    <!-- Without this the hardened runtime silences the microphone, for dictation. -->
+    <key>com.apple.security.device.audio-input</key><true/>
 </dict>
 </plist>

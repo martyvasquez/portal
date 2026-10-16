@@ -3,6 +3,8 @@ import Carbon.HIToolbox
 
 extension NSPasteboard.PasteboardType {
     static let portalMarker = NSPasteboard.PasteboardType("com.martyvasquez.portal.marker")
+    /// On text dictation wrote, so history shows it as dictated rather than from the app it went into.
+    static let dictation = NSPasteboard.PasteboardType(ClipPayload.dictationSource)
     // nspasteboard.org conventions used by password managers and other clipboard tools.
     static let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
     static let transient = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
@@ -49,11 +51,12 @@ final class ClipboardMonitor {
 
         let v = settings.values
         let front = NSWorkspace.shared.frontmostApplication
-        if let id = front?.bundleIdentifier, v.ignoredBundleIDs.contains(id) { return }
+        let dictated = types.contains(.dictation)
+        if !dictated, let id = front?.bundleIdentifier, v.ignoredBundleIDs.contains(id) { return }
 
         var p = ClipPayload(machineID: settings.machineID, machineName: settings.machineName, kind: .text, hash: "")
-        p.sourceApp = front?.localizedName
-        p.sourceBundleID = front?.bundleIdentifier
+        p.sourceApp = dictated ? "Dictation" : front?.localizedName
+        p.sourceBundleID = dictated ? ClipPayload.dictationSource : front?.bundleIdentifier
 
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
            !urls.isEmpty {

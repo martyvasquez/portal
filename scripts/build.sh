@@ -67,6 +67,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSAppleEventsUsageDescription</key><string>Portal asks Finder, Ghostty, and Terminal which folder you're in, and your browser which page you're on, to show matching snippets and open things with your apps.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Portal listens while the dictation window is open, and turns what you say into text on this Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Portal recognizes your speech on this Mac to type what you dictate.</string>
     <key>NSHumanReadableCopyright</key><string>© 2026 Marty Vasquez. MIT License.</string>
     <key>SUFeedURL</key><string>$FEED_URL</string>
     <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>

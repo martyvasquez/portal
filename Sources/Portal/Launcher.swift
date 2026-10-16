@@ -270,6 +270,7 @@ final class LauncherModel: ObservableObject {
 
     static let commands: [LaunchItem] = [
         LaunchItem(id: "cmd:clipboard", name: "Clipboard History", path: "", kind: .command, symbol: "doc.on.clipboard", keywords: "paste"),
+        LaunchItem(id: "cmd:dictate", name: "Dictate", path: "", kind: .command, symbol: "mic", keywords: "dictation voice speech talk transcribe"),
         LaunchItem(id: "cmd:new", name: "New Quicklink", path: "", kind: .command, symbol: "plus", keywords: "add create"),
         LaunchItem(id: "cmd:settings", name: "Portal Settings", path: "", kind: .command, symbol: "gearshape", keywords: "preferences"),
         LaunchItem(id: "cmd:update", name: "Check for Updates", path: "", kind: .command, symbol: "arrow.down.circle", keywords: "update upgrade version"),

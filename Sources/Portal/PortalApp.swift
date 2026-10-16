@@ -21,10 +21,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var monitor = ClipboardMonitor(store: clipStore, settings: settings)
     private lazy var launcher = LauncherModel(settings: settings)
     private lazy var clipModel = ClipboardModel(store: clipStore, settings: settings)
+    private lazy var dictation = DictationModel(settings: settings)
     private let router = SettingsRouter()
 
     private var launcherPanel: PanelController!
     private var clipboardPanel: PanelController!
+    private var dictationPanel: PanelController!
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem!
     private var pauseItem: NSMenuItem!
@@ -53,8 +55,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             launcherPanel.show()
         }
 
+        dictationPanel = PanelController(size: NSSize(width: 620, height: 280), rootView: AnyView(DictationView(model: dictation)))
+        dictationPanel.hidesOnResignKey = false   // a stray click shouldn't throw away what you said
+        dictationPanel.keyHandler = { [unowned self] in dictation.handleKey($0) }
+        dictationPanel.keyUpHandler = { [unowned self] in dictation.handleKeyUp($0) }
+        dictationPanel.onShow = { [unowned self] in dictation.start() }
+        dictationPanel.onHide = { [unowned self] in dictation.didHide() }
+        dictation.onDismiss = { [unowned self] in dictationPanel.hide() }
+
         AppUpdater.shared.isBusy = { [unowned self] in
-            launcherPanel.isVisible || clipboardPanel.isVisible || settingsWindow?.isVisible == true
+            launcherPanel.isVisible || clipboardPanel.isVisible || dictationPanel.isVisible || settingsWindow?.isVisible == true
         }
         AppUpdater.shared.start()
 
@@ -62,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildStatusItem()
 
         settings.$values
-            .map { HotKeyConfig(launcher: $0.launcherHotKey, clipboard: $0.clipboardHotKey,
+            .map { HotKeyConfig(launcher: $0.launcherHotKey, clipboard: $0.clipboardHotKey, dictation: $0.dictationHotKey,
                                 finder: $0.finderSelectionHotKey, links: $0.quicklinks, transformers: $0.transformers) }
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -93,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 switch target {
                 case "launcher": self?.toggleLauncher()
                 case "clipboard": self?.toggleClipboard()
+                case "dictate": self?.toggleDictation()
                 case "new": self?.run(command: "new")
                 case let t? where t.hasPrefix("transform:"):
                     // Previews the named transformer on the clipboard's text ("transform:Polish"), or copies its
@@ -125,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private struct HotKeyConfig: Equatable {
-        let launcher: KeyCombo, clipboard: KeyCombo, finder: KeyCombo?, links: [Quicklink], transformers: [Transformer]
+        let launcher: KeyCombo, clipboard: KeyCombo, dictation: KeyCombo?, finder: KeyCombo?, links: [Quicklink], transformers: [Transformer]
     }
 
     private var scopedHotKeyIDs: [UInt32] = []
@@ -133,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func registerHotKeys() {
         HotKeyCenter.shared.register(id: 1, combo: settings.values.launcherHotKey) { [weak self] in self?.toggleLauncher() }
         HotKeyCenter.shared.register(id: 2, combo: settings.values.clipboardHotKey) { [weak self] in self?.toggleClipboard() }
+        if let combo = settings.values.dictationHotKey {
+            HotKeyCenter.shared.register(id: 4, combo: combo) { [weak self] in self?.toggleDictation() }
+        } else {
+            HotKeyCenter.shared.unregister(4)
+        }
 
         updateFinderHotKey()
         updateScopedHotKeys()
@@ -249,9 +265,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         clipboardPanel.toggle()
     }
 
+    /// Opens dictation, or, while it's open, finishes and inserts like ↩.
+    @objc func toggleDictation() {
+        launcherPanel.hide()
+        clipboardPanel.hide()
+        if dictationPanel.isVisible { dictation.finish(.insert) } else { dictationPanel.show() }
+    }
+
     private func run(command: String) {
         switch command {
         case "clipboard": DispatchQueue.main.async { self.clipboardPanel.show() }
+        case "dictate": DispatchQueue.main.async { self.toggleDictation() }
         case "settings": showSettings()
         case "chatgpt":
             router.page = .chatgpt
@@ -343,6 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Open Launcher", action: #selector(toggleLauncher), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Clipboard History", action: #selector(toggleClipboard), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Dictate", action: #selector(toggleDictation), keyEquivalent: "").target = self
         menu.addItem(.separator())
         pauseItem = menu.addItem(withTitle: "Pause Clipboard Recording", action: #selector(togglePause), keyEquivalent: "")
         pauseItem.target = self

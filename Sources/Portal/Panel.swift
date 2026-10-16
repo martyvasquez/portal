@@ -34,6 +34,9 @@ final class FloatingPanel: NSPanel {
 final class PanelController {
     let panel: FloatingPanel
     var keyHandler: ((NSEvent) -> Bool)?
+    var keyUpHandler: ((NSEvent) -> Bool)?
+    /// Off for panels that hold work you'd lose to a stray click, like dictation.
+    var hidesOnResignKey = true
     var onShow: (() -> Void)?
     var onHide: (() -> Void)?
     private var monitor: Any?
@@ -48,7 +51,7 @@ final class PanelController {
         host.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = host
         panel.onResignKey = { [weak self] in
-            MainActor.assumeIsolated { self?.hide() }
+            MainActor.assumeIsolated { if self?.hidesOnResignKey != false { self?.hide() } }
         }
     }
 
@@ -66,10 +69,11 @@ final class PanelController {
             MainActor.assumeIsolated { self?.focusSearchField() }
         }
         if monitor == nil {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
                 MainActor.assumeIsolated {
                     guard let self, event.window === self.panel else { return event }
-                    return (self.keyHandler?(event) ?? false) ? nil : event
+                    let handler = event.type == .keyDown ? self.keyHandler : self.keyUpHandler
+                    return (handler?(event) ?? false) ? nil : event
                 }
             }
         }

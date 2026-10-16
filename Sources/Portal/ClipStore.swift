@@ -22,6 +22,10 @@ struct ClipPayload: Codable, Sendable {
     var sourceApp: String?
     var sourceBundleID: String?
     var hash: String
+
+    /// The source of text Portal's dictation wrote, shown with a microphone instead of an app.
+    static let dictationSource = "com.martyvasquez.portal.dictation"
+    var isDictation: Bool { sourceBundleID == Self.dictationSource }
 }
 
 struct Clip: Identifiable, Sendable {

@@ -3,7 +3,8 @@ import UniformTypeIdentifiers
 
 enum SettingsPage: String, CaseIterable, Identifiable {
     case general = "General", defaults = "Default Results", quicklinks = "Quicklinks", snippets = "Snippets"
-    case transformers = "AI Transformers", openWith = "Open With", clipboard = "Clipboard", chatgpt = "ChatGPT", sync = "Sync"
+    case transformers = "AI Transformers", openWith = "Open With", clipboard = "Clipboard", dictation = "Dictation"
+    case chatgpt = "ChatGPT", sync = "Sync"
     var id: String { rawValue }
 
     var symbol: String {
@@ -14,6 +15,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .transformers: "wand.and.sparkles"
         case .defaults: "pin"
         case .clipboard: "doc.on.clipboard"
+        case .dictation: "mic"
         case .chatgpt: "sparkles"
         case .general: "gearshape"
         case .sync: "icloud"
@@ -28,6 +30,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .transformers: .purple
         case .defaults: .red
         case .clipboard: .teal
+        case .dictation: .cyan
         case .chatgpt: .indigo
         case .general: .gray
         case .sync: .green
@@ -68,6 +71,7 @@ struct SettingsView: View {
                 case .defaults: DefaultResultsPage(settings: settings, launcher: launcher)
                 case .chatgpt: ChatGPTPage(settings: settings)
                 case .clipboard: ClipboardPage(settings: settings, store: store)
+                case .dictation: DictationPage(settings: settings)
                 case .general: GeneralPage(settings: settings, launcher: launcher)
                 case .sync: SyncPage(settings: settings, store: store, keys: keys)
                 }
@@ -1263,6 +1267,10 @@ private struct GeneralPage: View {
                         HotKeyRecorder(required: $settings.values.clipboardHotKey, defaultCombo: .clipboardDefault)
                     }
                     conflictWarning(for: settings.values.clipboardHotKey, id: 2)
+                    LabeledContent("Dictation") {
+                        HotKeyRecorder(combo: $settings.values.dictationHotKey, placeholder: "Record Shortcut")
+                    }
+                    if let combo = settings.values.dictationHotKey { conflictWarning(for: combo, id: 4) }
                 }
 
                 Section {
@@ -1609,6 +1617,7 @@ enum HotKeyClash {
         func same(_ other: KeyCombo?) -> Bool { other?.keyCode == combo.keyCode && other?.modifiers == combo.modifiers }
         if same(v.launcherHotKey) { return "the launcher" }
         if same(v.clipboardHotKey) { return "clipboard history" }
+        if same(v.dictationHotKey) { return "dictation" }
         if let other = v.quicklinks.first(where: { $0.id != id && same($0.hotKey) && scope.overlaps($0) }) { return "“\(other.name)”" }
         if let other = v.transformers.first(where: { $0.id != id && same($0.hotKey) && scope.overlaps($0) }) {
             return "“\(other.name)”"
