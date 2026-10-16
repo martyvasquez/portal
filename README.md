@@ -219,6 +219,7 @@ like `Format this for an email with a bulleted summary`. To only change formatti
 - **One-off prompts**: type `transform` and your prompt, like `transform translate to Spanish`, and press `↩`. Or pick **Transform with AI…**.
 - **Where it shows**: by default, on any selected text. Add apps (Mail) or websites (`mail.google.com`) under **Show in** and it shows only there, under its own heading ("For mail.google.com") above the global ones. A global transformer can list places under **Except in** where it stays hidden (say, your terminal).
 - **Hotkeys**: give a transformer a hotkey to run it on the selection without opening the list. A scoped transformer's hotkey only works where it shows, so transformers for different places can share one key.
+- **Closing mid-run**: click away and the transformer keeps going. Open Portal again and its result is back, until you paste it, copy it, or press `⎋`. `⎋` while it's still running cancels it. A result that comes back never pastes on its own; it waits for you.
 - **Clips**: in clipboard history, `⌘A` runs an AI transformer on the selected clip, formatting included. Secrets are never sent.
 - **Model**: the newest model your ChatGPT account offers, at low thinking so it's quick. Change it in Settings → ChatGPT, or per transformer.
 

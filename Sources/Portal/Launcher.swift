@@ -243,6 +243,8 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var runAction: TransformAction = .preview
     /// The result was just copied; the launcher shows a confirmation, then closes.
     @Published private(set) var copied = false
+    /// `run` came back when the launcher reopened: what it ran on may be gone, so ⎋ closes.
+    private var resumed = false
     /// Set before showing, to open on a clip's transformers or straight into a transformer.
     private var queued: (input: TransformInput, transformer: Transformer?)?
     /// Opened from clipboard history: only transformers, no apps or quicklinks.
@@ -337,9 +339,6 @@ final class LauncherModel: ObservableObject {
     func prepareForShow() {
         showCount += 1
         let shown = showCount
-        run?.cancel()
-        run = nil
-        copied = false
         pending = nil
         promptMode = false
         query = ""
@@ -348,6 +347,17 @@ final class LauncherModel: ObservableObject {
         let front = NSWorkspace.shared.frontmostApplication
         frontApp = front
         context = SnippetContext(appID: front?.bundleIdentifier, appName: front?.localizedName)
+        // A result you haven't used or dismissed comes back, finished or still streaming,
+        // ahead of anything queued. It pastes into the app in front now.
+        if run != nil, !copied {
+            queued = nil
+            resumed = true
+            return
+        }
+        resumed = false
+        run?.cancel()
+        run = nil
+        copied = false
         let queued = self.queued
         self.queued = nil
         transformOnly = queued != nil && queued?.transformer == nil
@@ -388,9 +398,12 @@ final class LauncherModel: ObservableObject {
         }
     }
 
-    /// The panel closed: stop any run, so a late reply never pastes into whatever is in front now.
+    /// The panel closed: the run keeps going and waits to be seen. A late reply never pastes or
+    /// copies on its own, since something else may be in front now; it shows as a preview instead.
     func didHide() {
-        run?.cancel()
+        guard let run, !copied else { return }
+        run.onFirstReply = nil
+        runAction = .preview
     }
 
     /// Rows for the transformers, when there's selected text or a clip to work on: the ones that
@@ -1070,6 +1083,7 @@ extension LauncherModel {
     func deliver(_ text: String, _ action: TransformAction) {
         let content = RichText.content(text, as: run?.pasteFormat ?? .formatted)
         guard action == .copy || !canPaste else {
+            run = nil   // used: it won't come back next time
             onDismiss()
             SnippetPaster.paste(content)
             return
@@ -1085,12 +1099,18 @@ extension LauncherModel {
         }
     }
 
-    /// Back from a run to the transformers.
+    /// Back from a run to the transformers, cancelling it if it's still going. A resumed run closes
+    /// the launcher instead: the selection it ran on may be gone.
     func endRun() {
         run?.cancel()
         run = nil
         copied = false
         query = ""
+        if resumed {
+            resumed = false
+            onDismiss()
+            return
+        }
         search()
     }
 
