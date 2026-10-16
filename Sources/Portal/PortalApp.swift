@@ -266,16 +266,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Opens dictation, or, while it's open, finishes and inserts like ↩.
+    /// It opens before the launcher closes, during the same keypress: once the launcher is gone,
+    /// macOS hands the keyboard back to the app you were in, and a panel shown after that looks
+    /// focused but never receives ↩, ⌘↩, Space, or esc.
     @objc func toggleDictation() {
+        if dictationPanel.isVisible {
+            dictation.finish(.insert)
+        } else {
+            dictationPanel.show()
+        }
         launcherPanel.hide()
         clipboardPanel.hide()
-        if dictationPanel.isVisible { dictation.finish(.insert) } else { dictationPanel.show() }
     }
 
     private func run(command: String) {
         switch command {
         case "clipboard": DispatchQueue.main.async { self.clipboardPanel.show() }
-        case "dictate": DispatchQueue.main.async { self.toggleDictation() }
+        case "dictate": toggleDictation()
         case "settings": showSettings()
         case "chatgpt":
             router.page = .chatgpt
